@@ -1,0 +1,14 @@
+# front
+front/node_modules/
+front/dist/
+front/.env
+
+# back
+back/**/bin/
+back/**/obj/
+back/**/.vs/
+back/Backend/appsettings.Development.json
+back/Backend/Backend.csproj.user
+
+# temp
+front/src/app/App.full.tsx.bak
