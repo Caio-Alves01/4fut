@@ -39,7 +39,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
             </div>
           </div>
           <CardTitle className="text-3xl text-center bg-gradient-to-r from-verde-brasil to-azul-brasil bg-clip-text text-transparent">
-            443 Fut
+            4Fut
           </CardTitle>
           <CardDescription className="text-center">
             Entre para gerenciar suas peladas

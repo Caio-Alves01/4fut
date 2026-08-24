@@ -53,7 +53,7 @@ export default function App() {
               </div>
               <div className="text-left">
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-verde-brasil to-azul-brasil bg-clip-text text-transparent">
-                  443 Fut
+                  4Fut
                 </h1>
                 <p className="text-xs text-muted-foreground">Gestão de Peladas Profissional</p>
               </div>

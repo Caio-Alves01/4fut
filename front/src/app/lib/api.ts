@@ -1,4 +1,4 @@
-const TOKEN_KEY = 'fut443_token';
+const TOKEN_KEY = 'fut4_token';
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
