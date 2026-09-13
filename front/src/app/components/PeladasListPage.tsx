@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -28,6 +28,7 @@ import {
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
+import { api, ApiError } from '../lib/api';
 
 type DayOfWeek = 'segunda' | 'terca' | 'quarta' | 'quinta' | 'sexta' | 'sabado' | 'domingo';
 
@@ -117,52 +118,9 @@ const dayConfig: Record<DayOfWeek, {
 const daysOrder: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado', 'domingo'];
 
 export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
-  const [peladas, setPeladas] = useState<Pelada[]>([
-    {
-      id: 1,
-      name: "Pelada dos Amigos",
-      description: "Futebol de sábado com a galera",
-      daysOfWeek: ['sabado'],
-      totalPlayers: 24,
-      totalMatches: 8,
-      balance: 1240,
-      createdAt: "2025-01-15",
-      active: true
-    },
-    {
-      id: 2,
-      name: "Racha da Firma",
-      description: "Futebol corporativo toda quinta",
-      daysOfWeek: ['quinta'],
-      totalPlayers: 18,
-      totalMatches: 12,
-      balance: 890,
-      createdAt: "2024-12-10",
-      active: true
-    },
-    {
-      id: 3,
-      name: "Pelada do Condomínio",
-      description: "Fim de semana inteiro",
-      daysOfWeek: ['sabado', 'domingo'],
-      totalPlayers: 16,
-      totalMatches: 5,
-      balance: 450,
-      createdAt: "2025-01-20",
-      active: true
-    },
-    {
-      id: 4,
-      name: "Futebol da Semana",
-      description: "Terça e quinta toda semana",
-      daysOfWeek: ['terca', 'quinta'],
-      totalPlayers: 14,
-      totalMatches: 6,
-      balance: 320,
-      createdAt: "2025-01-22",
-      active: true
-    }
-  ]);
+  const [peladas, setPeladas] = useState<Pelada[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newPelada, setNewPelada] = useState({
@@ -171,41 +129,71 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
     daysOfWeek: [] as DayOfWeek[]
   });
 
+  useEffect(() => {
+    carregarPeladas();
+  }, []);
+
+  async function carregarPeladas() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<Pelada[]>('/peladas');
+      setPeladas(data);
+    } catch (err) {
+      setError(err instanceof ApiError ? "Não foi possível carregar suas peladas." : "Não foi possível conectar ao servidor.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Agrupar peladas por dia da semana
-  const peladasByDay = daysOrder.reduce((acc, day) => {
+  const peladasByDay: Record<string, Pelada[]> = {};
+  for (const day of daysOrder) {
     const dayPeladas = peladas.filter(p => p.daysOfWeek.includes(day));
     if (dayPeladas.length > 0) {
-      acc[day] = dayPeladas;
+      peladasByDay[day] = dayPeladas;
     }
-    return acc;
-  }, {} as Record<DayOfWeek, Pelada[]>);
+  }
 
-  const handleCreatePelada = () => {
-    const newPeladaData: Pelada = {
-      id: peladas.length + 1,
-      name: newPelada.name,
-      description: newPelada.description,
-      daysOfWeek: newPelada.daysOfWeek,
-      totalPlayers: 0,
-      totalMatches: 0,
-      balance: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      active: true
-    };
+  // Somas usadas no painel de estatísticas do topo
+  let totalJogadores = 0;
+  let totalPartidas = 0;
+  let saldoTotal = 0;
+  for (const pelada of peladas) {
+    totalJogadores += pelada.totalPlayers;
+    totalPartidas += pelada.totalMatches;
+    saldoTotal += pelada.balance;
+  }
 
-    setPeladas([...peladas, newPeladaData]);
-    setIsCreateDialogOpen(false);
-    setNewPelada({ name: '', description: '', daysOfWeek: [] });
-  };
+  async function handleCreatePelada() {
+    try {
+      await api.post('/peladas', {
+        name: newPelada.name,
+        description: newPelada.description,
+        daysOfWeek: newPelada.daysOfWeek,
+      });
+      setIsCreateDialogOpen(false);
+      setNewPelada({ name: '', description: '', daysOfWeek: [] });
+      await carregarPeladas();
+    } catch (err) {
+      setError(err instanceof ApiError ? "Não foi possível criar a pelada." : "Não foi possível conectar ao servidor.");
+    }
+  }
 
-  const toggleDay = (day: DayOfWeek) => {
-    setNewPelada(prev => ({
-      ...prev,
-      daysOfWeek: prev.daysOfWeek.includes(day)
-        ? prev.daysOfWeek.filter(d => d !== day)
-        : [...prev.daysOfWeek, day]
-    }));
-  };
+  function toggleDay(day: DayOfWeek) {
+    const jaSelecionado = newPelada.daysOfWeek.includes(day);
+    let novosDias: DayOfWeek[];
+    if (jaSelecionado) {
+      novosDias = newPelada.daysOfWeek.filter(d => d !== day);
+    } else {
+      novosDias = [...newPelada.daysOfWeek, day];
+    }
+    setNewPelada({ ...newPelada, daysOfWeek: novosDias });
+  }
+
+  if (loading) {
+    return <p className="text-muted-foreground">Carregando peladas...</p>;
+  }
 
   return (
     <div className="space-y-6">
@@ -217,7 +205,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
             Gerencie todas as suas peladas em um só lugar
           </p>
         </div>
-        <Button 
+        <Button
           onClick={() => setIsCreateDialogOpen(true)}
           className="flex items-center gap-2 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
         >
@@ -225,6 +213,8 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
           Nova Pelada
         </Button>
       </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {/* Stats Overview */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -248,7 +238,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
               <div>
                 <p className="text-sm text-muted-foreground">Total de Jogadores</p>
                 <p className="text-3xl font-bold text-secondary">
-                  {peladas.reduce((sum, p) => sum + p.totalPlayers, 0)}
+                  {totalJogadores}
                 </p>
               </div>
               <div className="p-3 bg-secondary/10 rounded-xl">
@@ -264,7 +254,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
               <div>
                 <p className="text-sm text-muted-foreground">Total de Partidas</p>
                 <p className="text-3xl font-bold text-amarelo-escuro">
-                  {peladas.reduce((sum, p) => sum + p.totalMatches, 0)}
+                  {totalPartidas}
                 </p>
               </div>
               <div className="p-3 bg-amarelo-brasil/20 rounded-xl">
@@ -280,7 +270,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
               <div>
                 <p className="text-sm text-muted-foreground">Saldo Total</p>
                 <p className="text-3xl font-bold text-verde-claro">
-                  R$ {peladas.reduce((sum, p) => sum + p.balance, 0).toFixed(2)}
+                  R$ {saldoTotal.toFixed(2)}
                 </p>
               </div>
               <div className="p-3 bg-verde-claro/10 rounded-xl">

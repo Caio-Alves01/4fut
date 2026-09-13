@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,11 +16,13 @@ namespace Backend.Controllers
     {
         private readonly AppDbContext _db;
         private readonly TokenService _tokenService;
+        private readonly EmailService _emailService;
 
-        public AuthController(AppDbContext db, TokenService tokenService)
+        public AuthController(AppDbContext db, TokenService tokenService, EmailService emailService)
         {
             _db = db;
             _tokenService = tokenService;
+            _emailService = emailService;
         }
 
         [HttpPost("register")]
@@ -96,6 +99,57 @@ namespace Backend.Controllers
             await _db.SaveChangesAsync();
 
             return Ok(new UserResponse(user.Id, user.Name, user.Email, user.CreatedAt));
+        }
+
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
+        {
+            var emailNormalized = request.Email.Trim().ToLowerInvariant();
+            var user = await _db.Users.SingleOrDefaultAsync(u => u.Email == emailNormalized);
+
+            // Não conta pro chamador se o e-mail existe ou não, só finge que enviou.
+            if (user is null)
+                return Ok();
+
+            var codigo = GerarCodigoDeSeisDigitos();
+            user.ResetCode = codigo;
+            user.ResetCodeExpiresAt = DateTime.UtcNow.AddMinutes(10);
+            await _db.SaveChangesAsync();
+
+            var corpoDoEmail = $"Seu código para redefinir a senha do 4Fut é: {codigo}\n\nEle vale por 10 minutos.";
+            await _emailService.SendAsync(user.Email, "Código de recuperação de senha - 4Fut", corpoDoEmail);
+
+            return Ok();
+        }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+        {
+            var emailNormalized = request.Email.Trim().ToLowerInvariant();
+            var user = await _db.Users.SingleOrDefaultAsync(u => u.Email == emailNormalized);
+
+            var codigoValido =
+                user is not null &&
+                user.ResetCode == request.Code &&
+                user.ResetCodeExpiresAt is not null &&
+                user.ResetCodeExpiresAt.Value > DateTime.UtcNow;
+
+            if (!codigoValido)
+                return BadRequest("Código inválido ou expirado.");
+
+            user!.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.ResetCode = null;
+            user.ResetCodeExpiresAt = null;
+            await _db.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        // Gera um código de 6 dígitos (000000 a 999999) usando um gerador aleatório seguro.
+        private static string GerarCodigoDeSeisDigitos()
+        {
+            var numero = RandomNumberGenerator.GetInt32(0, 1_000_000);
+            return numero.ToString("D6");
         }
     }
 }

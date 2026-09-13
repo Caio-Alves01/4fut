@@ -43,7 +43,7 @@ export function AccountPage({ onNavigate }: AccountPageProps) {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSave = async () => {
+  async function handleSave() {
     setError(null);
     setSuccess(null);
     setSaving(true);
@@ -56,14 +56,27 @@ export function AccountPage({ onNavigate }: AccountPageProps) {
     } finally {
       setSaving(false);
     }
-  };
+  }
 
-  const initials = name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase())
-    .join("") || "?";
+  // Pega a primeira letra do primeiro e do segundo nome (ex: "João Silva" -> "JS")
+  function getInitials(fullName: string): string {
+    const nomeSemEspacosExtras = fullName.trim();
+    if (nomeSemEspacosExtras === "") {
+      return "?";
+    }
+
+    const partesDoNome = nomeSemEspacosExtras.split(/\s+/);
+    let resultado = "";
+    for (let i = 0; i < partesDoNome.length && i < 2; i++) {
+      const primeiraLetra = partesDoNome[i][0];
+      if (primeiraLetra) {
+        resultado += primeiraLetra.toUpperCase();
+      }
+    }
+    return resultado || "?";
+  }
+
+  const initials = getInitials(name);
 
   if (loading) {
     return <p className="text-muted-foreground">Carregando conta...</p>;

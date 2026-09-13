@@ -18,7 +18,7 @@ export function RegisterPage({ onNavigate }: RegisterPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleRegister = async () => {
+  async function handleRegister() {
     setError(null);
 
     if (!name.trim() || !email.trim() || !password) {
@@ -40,7 +40,7 @@ export function RegisterPage({ onNavigate }: RegisterPageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">

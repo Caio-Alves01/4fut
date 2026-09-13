@@ -3,6 +3,11 @@ import { LoginPage } from './components/LoginPage';
 import { RegisterPage } from './components/RegisterPage';
 import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { PeladasListPage } from './components/PeladasListPage';
+import { PeladaDetailPage } from './components/PeladaDetailPage';
+import { JogadoresPage } from './components/JogadoresPage';
+import { PartidasPage } from './components/PartidasPage';
+import { FinancasPage } from './components/FinancasPage';
+import { RankingPage } from './components/RankingPage';
 import { AccountPage } from './components/AccountPage';
 import { Button } from './components/ui/button';
 import { LogOut, Trophy, User } from 'lucide-react';
@@ -92,6 +97,21 @@ export default function App() {
         <main>
           {currentPage === 'peladas-list' && (
             <PeladasListPage onNavigate={handleNavigate} />
+          )}
+          {currentPage === 'pelada-detail' && selectedPeladaId && (
+            <PeladaDetailPage peladaId={selectedPeladaId} onNavigate={handleNavigate} />
+          )}
+          {currentPage === 'jogadores' && selectedPeladaId && (
+            <JogadoresPage peladaId={selectedPeladaId} onNavigate={handleNavigate} />
+          )}
+          {currentPage === 'partidas' && selectedPeladaId && (
+            <PartidasPage peladaId={selectedPeladaId} onNavigate={handleNavigate} />
+          )}
+          {currentPage === 'financas' && selectedPeladaId && (
+            <FinancasPage peladaId={selectedPeladaId} onNavigate={handleNavigate} />
+          )}
+          {currentPage === 'ranking' && selectedPeladaId && (
+            <RankingPage peladaId={selectedPeladaId} onNavigate={handleNavigate} />
           )}
           {currentPage === 'account' && (
             <AccountPage onNavigate={handleNavigate} />

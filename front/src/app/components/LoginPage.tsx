@@ -15,7 +15,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  async function handleLogin() {
     setError(null);
     setLoading(true);
     try {
@@ -27,7 +27,7 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
