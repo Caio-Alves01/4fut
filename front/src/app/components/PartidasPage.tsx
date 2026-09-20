@@ -123,23 +123,117 @@ function confirmacaoBadge(status: Presenca['confirmacao']) {
   );
 }
 
+interface MatchForm {
+  date: string;
+  time: string;
+  location: string;
+}
+
+const emptyMatchForm: MatchForm = { date: '', time: '', location: '' };
+
+// Data de hoje no formato do <input type="date"> (AAAA-MM-DD), no fuso do usuário.
+function hojeISO(): string {
+  const agora = new Date();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  return `${agora.getFullYear()}-${mes}-${dia}`;
+}
+
+// Data e horário informados já passaram? (usa o relógio do usuário)
+function dataHoraNoPassado(date: string, time: string): boolean {
+  if (!date) return false;
+  if (date < hojeISO()) return true;
+  if (date === hojeISO() && time) {
+    const [hora, minuto] = time.split(':').map(Number);
+    const agora = new Date();
+    return hora * 60 + minuto < agora.getHours() * 60 + agora.getMinutes();
+  }
+  return false;
+}
+
+// Mensagem de erro do formulário de partida (null = tudo certo para salvar).
+function erroDoFormulario(form: MatchForm): string | null {
+  if (dataHoraNoPassado(form.date, form.time)) {
+    return 'Não é possível marcar uma partida em data ou horário que já passaram.';
+  }
+  return null;
+}
+
+interface MatchFieldsProps {
+  idPrefix: string;
+  form: MatchForm;
+  onChange: (form: MatchForm) => void;
+  error?: string | null;
+}
+
+// Campos da partida, usados nos diálogos de agendar e editar.
+function MatchFields({ idPrefix, form, onChange, error }: MatchFieldsProps) {
+  return (
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Date`}>Data</Label>
+        <Input
+          id={`${idPrefix}Date`}
+          type="date"
+          min={hojeISO()}
+          value={form.date}
+          onChange={(e) => onChange({ ...form, date: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Time`}>Horário</Label>
+        <Input
+          id={`${idPrefix}Time`}
+          type="time"
+          value={form.time}
+          onChange={(e) => onChange({ ...form, time: e.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Location`}>Local</Label>
+        <Input
+          id={`${idPrefix}Location`}
+          placeholder="Ex: Arena do Bairro"
+          value={form.location}
+          onChange={(e) => onChange({ ...form, location: e.target.value })}
+        />
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [showEscalacao, setShowEscalacao] = useState(false);
 
+  // Partida que está sendo editada (null = diálogo de edição fechado)
+  const [editingMatch, setEditingMatch] = useState<Match | null>(null);
+  const [editForm, setEditForm] = useState<MatchForm>(emptyMatchForm);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const [matches, setMatches] = useState<Match[]>([]);
+  const [jogadoresAtivos, setJogadoresAtivos] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Busca as partidas reais da pelada no back-end assim que a página abre.
+  // Busca as partidas e os jogadores reais da pelada no back-end assim que a página abre.
   useEffect(() => {
     async function carregarPartidas() {
       setLoading(true);
       setError(null);
       try {
-        const data = await api.get<Match[]>(`/peladas/${peladaId}/partidas`);
+        const [data, jogadores] = await Promise.all([
+          api.get<Match[]>(`/peladas/${peladaId}/partidas`),
+          api.get<{ status: string }[]>(`/peladas/${peladaId}/jogadores`),
+        ]);
         setMatches(data);
+        setJogadoresAtivos(jogadores.filter(j => j.status === 'ativo').length);
       } catch (err) {
         setError(err instanceof ApiError ? 'Não foi possível carregar as partidas.' : 'Não foi possível conectar ao servidor.');
       } finally {
@@ -149,13 +243,15 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     carregarPartidas();
   }, [peladaId]);
 
-  const [newMatch, setNewMatch] = useState({
-    date: '',
-    time: '',
-    location: ''
-  });
+  const [newMatch, setNewMatch] = useState<MatchForm>(emptyMatchForm);
 
 
+  // Erros de data no passado. Na edição só vale se o usuário mudou data ou horário
+  // (uma partida antiga ainda agendada pode ter o local corrigido sem mexer na data).
+  const erroNovaPartida = erroDoFormulario(newMatch);
+  const mudouDataHora = editingMatch !== null &&
+    (editForm.date !== editingMatch.date.slice(0, 10) || editForm.time !== editingMatch.time);
+  const erroEdicao = mudouDataHora ? erroDoFormulario(editForm) : null;
 
   const upcomingMatches = matches.filter(m => m.status === 'agendada');
   const pastMatches = matches.filter(m => m.status === 'finalizada');
@@ -182,9 +278,46 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
       setMatches([...matches, match]);
       setIsCreateDialogOpen(false);
-      setNewMatch({ date: '', time: '', location: '' });
+      setNewMatch(emptyMatchForm);
     } catch (err) {
       setError(err instanceof ApiError ? 'Não foi possível agendar a partida.' : 'Não foi possível conectar ao servidor.');
+    }
+  }
+
+  function abrirEdicao(match: Match) {
+    setEditingMatch(match);
+    setEditError(null);
+    setEditForm({
+      // A API devolve a data como "2026-09-25T00:00:00"; o input de data quer só "2026-09-25".
+      date: match.date.slice(0, 10),
+      time: match.time,
+      location: match.location,
+    });
+  }
+
+  async function handleSalvarEdicao() {
+    if (!editingMatch) return;
+
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      // Status e placar seguem os atuais da partida; a edição só muda data, horário e local.
+      const partidaAtualizada = await api.put<Match>(`/peladas/${peladaId}/partidas/${editingMatch.id}`, {
+        date: editForm.date,
+        time: editForm.time,
+        location: editForm.location,
+        status: editingMatch.status,
+        scoreTeam1: editingMatch.scoreTeam1 ?? null,
+        scoreTeam2: editingMatch.scoreTeam2 ?? null,
+      });
+
+      // Mantém eventos e presenças que só existem no front por enquanto.
+      setMatches(matches.map(m => m.id === editingMatch.id ? { ...m, ...partidaAtualizada } : m));
+      setEditingMatch(null);
+    } catch (err) {
+      setEditError(err instanceof ApiError ? 'Não foi possível salvar as alterações.' : 'Não foi possível conectar ao servidor.');
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -690,7 +823,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
           <CardContent className="p-4">
             <div className="text-center">
               <Users className="h-8 w-8 mx-auto mb-2 text-green-500" />
-              <p className="text-2xl font-bold">22</p>
+              <p className="text-2xl font-bold">{jogadoresAtivos}</p>
               <p className="text-sm text-muted-foreground">Jogadores Ativos</p>
             </div>
           </CardContent>
@@ -740,10 +873,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                     <Button 
                       variant="outline"
                       className="border-2 hover:bg-secondary hover:text-white transition-colors"
-                      onClick={() => {
-                        // TODO: Implement edit functionality
-                        console.log('Edit match:', match.id);
-                      }}
+                      aria-label="Editar partida"
+                      onClick={() => abrirEdicao(match)}
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
@@ -829,52 +960,56 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="matchDate">Data</Label>
-              <Input
-                id="matchDate"
-                type="date"
-                value={newMatch.date}
-                onChange={(e) => setNewMatch({ ...newMatch, date: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="matchTime">Horário</Label>
-              <Input
-                id="matchTime"
-                type="time"
-                value={newMatch.time}
-                onChange={(e) => setNewMatch({ ...newMatch, time: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="matchLocation">Local</Label>
-              <Input
-                id="matchLocation"
-                placeholder="Ex: Arena do Bairro"
-                value={newMatch.location}
-                onChange={(e) => setNewMatch({ ...newMatch, location: e.target.value })}
-              />
-            </div>
-          </div>
+          <MatchFields idPrefix="match" form={newMatch} onChange={setNewMatch} error={erroNovaPartida} />
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setIsCreateDialogOpen(false)}
               className="border-2"
             >
               Cancelar
             </Button>
-            <Button 
+            <Button
               onClick={handleCreateMatch}
-              disabled={!newMatch.date || !newMatch.time || !newMatch.location}
+              disabled={!newMatch.date || !newMatch.time || !newMatch.location.trim() || erroNovaPartida !== null}
               className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
             >
               Agendar Partida
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Match Dialog */}
+      <Dialog open={editingMatch !== null} onOpenChange={(open) => { if (!open) setEditingMatch(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="h-5 w-5" />
+              Editar Partida
+            </DialogTitle>
+            <DialogDescription>
+              Altere a data, o horário ou o local da partida
+            </DialogDescription>
+          </DialogHeader>
+
+          <MatchFields idPrefix="editMatch" form={editForm} onChange={setEditForm} error={erroEdicao ?? editError} />
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingMatch(null)}
+              className="border-2"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSalvarEdicao}
+              disabled={savingEdit || !editForm.date || !editForm.time || !editForm.location.trim() || erroEdicao !== null}
+              className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
+            >
+              {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -32,6 +32,13 @@ namespace Backend.Controllers
             return pelada;
         }
 
+        // Não deixa marcar partida em data passada. Compara só o dia e aceita 1 dia de folga,
+        // porque o servidor pode estar em outro fuso que o usuário (ex: UTC vs Brasília).
+        private static bool DataNoPassado(DateTime data)
+        {
+            return data.Date < DateTime.UtcNow.Date.AddDays(-1);
+        }
+
         [HttpGet]
         public async Task<ActionResult<List<PartidaResponse>>> Listar(int peladaId)
         {
@@ -60,6 +67,9 @@ namespace Backend.Controllers
             if (pelada is null)
                 return NotFound();
 
+            if (DataNoPassado(request.Date))
+                return BadRequest("Não é possível agendar uma partida em data passada.");
+
             var partida = new Partida
             {
                 PeladaId = peladaId,
@@ -85,6 +95,12 @@ namespace Backend.Controllers
             var partida = await _db.Partidas.SingleOrDefaultAsync(p => p.Id == id && p.PeladaId == peladaId);
             if (partida is null)
                 return NotFound();
+
+            // Reagendar para uma data passada não vale. Partidas já realizadas (finalizada/em andamento)
+            // e edições que não mudam a data (ex: salvar placar) continuam livres.
+            var mudouData = partida.Date.Date != request.Date.Date;
+            if (mudouData && request.Status == "agendada" && DataNoPassado(request.Date))
+                return BadRequest("Não é possível reagendar uma partida para data passada.");
 
             partida.Date = request.Date;
             partida.Time = request.Time;

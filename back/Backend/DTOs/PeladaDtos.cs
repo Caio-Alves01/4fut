@@ -1,7 +1,21 @@
 namespace Backend.DTOs
 {
-    public record CreatePeladaRequest(string Name, string Description, List<string> DaysOfWeek);
-    public record UpdatePeladaRequest(string Name, string Description, string Local, string Horario);
+    public record CreatePeladaRequest(
+        string Name,
+        string Description,
+        List<string> DaysOfWeek,
+        string? Local = null,
+        string? Horario = null
+    );
+    // DaysOfWeek e Active são opcionais: quando não vêm, o valor atual da pelada é mantido.
+    public record UpdatePeladaRequest(
+        string Name,
+        string Description,
+        string Local,
+        string Horario,
+        List<string>? DaysOfWeek = null,
+        bool? Active = null
+    );
 
     public record PeladaResponse(
         int Id,

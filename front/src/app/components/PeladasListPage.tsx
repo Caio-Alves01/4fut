@@ -8,15 +8,8 @@ import {
   Calendar, 
   DollarSign,
   Edit,
-  MoreVertical,
   Trophy
 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -37,6 +30,8 @@ interface Pelada {
   name: string;
   description: string;
   daysOfWeek: DayOfWeek[];
+  local: string;
+  horario: string;
   totalPlayers: number;
   totalMatches: number;
   balance: number;
@@ -117,17 +112,149 @@ const dayConfig: Record<DayOfWeek, {
 
 const daysOrder: DayOfWeek[] = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado', 'domingo'];
 
+const novaPeladaVazia = {
+  name: '',
+  description: '',
+  local: '',
+  horario: '',
+  daysOfWeek: [] as DayOfWeek[]
+};
+
+// Máscara de horário 24h: aceita só números e monta "HH:MM" enquanto digita.
+// Corrige valores impossíveis (ex: "3" vira "03", "29" vira "23", "12:75" vira "12:59").
+function aplicarMascaraHorario(valor: string): string {
+  let digitos = valor.replace(/\D/g, '');
+
+  if (digitos.length > 0 && digitos[0] > '2') {
+    digitos = '0' + digitos;
+  }
+  digitos = digitos.slice(0, 4);
+
+  if (digitos.length >= 2 && Number(digitos.slice(0, 2)) > 23) {
+    digitos = '23' + digitos.slice(2);
+  }
+  if (digitos.length === 4 && Number(digitos.slice(2)) > 59) {
+    digitos = digitos.slice(0, 2) + '59';
+  }
+
+  if (digitos.length <= 2) return digitos;
+  return `${digitos.slice(0, 2)}:${digitos.slice(2)}`;
+}
+
+// Horário é opcional: vazio é válido, mas se digitou algo precisa estar completo (HH:MM).
+function horarioValido(horario: string): boolean {
+  return horario === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(horario);
+}
+
+interface TimeInputProps {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function TimeInput({ id, value, onChange }: TimeInputProps) {
+  return (
+    <div className="space-y-1">
+      <Input
+        id={id}
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="00:00"
+        maxLength={5}
+        value={value}
+        onChange={(e) => onChange(aplicarMascaraHorario(e.target.value))}
+      />
+      {!horarioValido(value) && (
+        <p className="text-xs text-destructive">Digite o horário completo, ex: 20:00</p>
+      )}
+    </div>
+  );
+}
+
+interface DayPickerProps {
+  selected: DayOfWeek[];
+  onChange: (days: DayOfWeek[]) => void;
+}
+
+// Lista de dias da semana com checkbox, usada nos diálogos de criar e editar pelada.
+function DayPicker({ selected, onChange }: DayPickerProps) {
+  function toggleDay(day: DayOfWeek) {
+    if (selected.includes(day)) {
+      onChange(selected.filter(d => d !== day));
+    } else {
+      onChange([...selected, day]);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label>Dias da Semana *</Label>
+      <p className="text-xs text-muted-foreground">
+        Selecione um ou mais dias em que a pelada acontece
+      </p>
+      <div className="space-y-2 border rounded-lg p-4">
+        {daysOrder.map((day) => {
+          const config = dayConfig[day];
+          const isChecked = selected.includes(day);
+
+          return (
+            <div
+              key={day}
+              className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
+                isChecked
+                  ? `${config.borderColor} ${config.lightBg}`
+                  : 'border-transparent hover:bg-accent'
+              }`}
+              onClick={() => toggleDay(day)}
+            >
+              <Checkbox
+                id={`day-${day}`}
+                checked={isChecked}
+                onCheckedChange={() => toggleDay(day)}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <label
+                htmlFor={`day-${day}`}
+                className="flex items-center gap-3 flex-1 cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className={`w-4 h-4 rounded-full ${config.bgColor}`}></div>
+                <span className={isChecked ? config.color : 'text-foreground'}>
+                  {config.label}
+                </span>
+              </label>
+            </div>
+          );
+        })}
+      </div>
+      {selected.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {selected.length} {selected.length === 1 ? 'dia selecionado' : 'dias selecionados'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
   const [peladas, setPeladas] = useState<Pelada[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [newPelada, setNewPelada] = useState({
+  const [newPelada, setNewPelada] = useState(novaPeladaVazia);
+
+  // Pelada que está sendo editada (null = diálogo de edição fechado)
+  const [editingPelada, setEditingPelada] = useState<Pelada | null>(null);
+  const [editForm, setEditForm] = useState({
     name: '',
     description: '',
+    local: '',
+    horario: '',
     daysOfWeek: [] as DayOfWeek[]
   });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     carregarPeladas();
@@ -167,28 +294,41 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
 
   async function handleCreatePelada() {
     try {
-      await api.post('/peladas', {
-        name: newPelada.name,
-        description: newPelada.description,
-        daysOfWeek: newPelada.daysOfWeek,
-      });
+      await api.post('/peladas', newPelada);
       setIsCreateDialogOpen(false);
-      setNewPelada({ name: '', description: '', daysOfWeek: [] });
+      setNewPelada(novaPeladaVazia);
       await carregarPeladas();
     } catch (err) {
       setError(err instanceof ApiError ? "Não foi possível criar a pelada." : "Não foi possível conectar ao servidor.");
     }
   }
 
-  function toggleDay(day: DayOfWeek) {
-    const jaSelecionado = newPelada.daysOfWeek.includes(day);
-    let novosDias: DayOfWeek[];
-    if (jaSelecionado) {
-      novosDias = newPelada.daysOfWeek.filter(d => d !== day);
-    } else {
-      novosDias = [...newPelada.daysOfWeek, day];
+  function abrirEdicao(pelada: Pelada) {
+    setEditingPelada(pelada);
+    setEditError(null);
+    setEditForm({
+      name: pelada.name,
+      description: pelada.description,
+      local: pelada.local ?? '',
+      horario: pelada.horario ?? '',
+      daysOfWeek: pelada.daysOfWeek
+    });
+  }
+
+  async function handleSalvarEdicao() {
+    if (!editingPelada) return;
+
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await api.put(`/peladas/${editingPelada.id}`, editForm);
+      setEditingPelada(null);
+      await carregarPeladas();
+    } catch (err) {
+      setEditError(err instanceof ApiError ? "Não foi possível salvar as alterações." : "Não foi possível conectar ao servidor.");
+    } finally {
+      setSavingEdit(false);
     }
-    setNewPelada({ ...newPelada, daysOfWeek: novosDias });
   }
 
   if (loading) {
@@ -337,22 +477,6 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
                             </div>
                           )}
                         </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive">
-                              Arquivar
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                     </CardHeader>
 
@@ -398,10 +522,8 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
                       <Button 
                         variant="outline"
                         className="flex items-center gap-2 border-2 hover:bg-secondary hover:text-white transition-colors"
-                        onClick={() => {
-                          // TODO: Implement edit functionality
-                          console.log('Edit pelada:', pelada.id);
-                        }}
+                        aria-label="Editar pelada"
+                        onClick={() => abrirEdicao(pelada)}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -464,50 +586,30 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
               />
             </div>
 
-            <div className="space-y-3">
-              <Label>Dias da Semana *</Label>
-              <p className="text-xs text-muted-foreground">
-                Selecione um ou mais dias em que a pelada acontece
-              </p>
-              <div className="space-y-2 border rounded-lg p-4">
-                {daysOrder.map((day) => {
-                  const config = dayConfig[day];
-                  const isChecked = newPelada.daysOfWeek.includes(day);
-                  
-                  return (
-                    <div 
-                      key={day} 
-                      className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                        isChecked 
-                          ? `${config.borderColor} ${config.lightBg}` 
-                          : 'border-transparent hover:bg-accent'
-                      }`}
-                      onClick={() => toggleDay(day)}
-                    >
-                      <Checkbox
-                        id={day}
-                        checked={isChecked}
-                        onCheckedChange={() => toggleDay(day)}
-                      />
-                      <label
-                        htmlFor={day}
-                        className="flex items-center gap-3 flex-1 cursor-pointer"
-                      >
-                        <div className={`w-4 h-4 rounded-full ${config.bgColor}`}></div>
-                        <span className={isChecked ? config.color : 'text-foreground'}>
-                          {config.label}
-                        </span>
-                      </label>
-                    </div>
-                  );
-                })}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="local">Local</Label>
+                <Input
+                  id="local"
+                  placeholder="Ex: Quadra do bairro"
+                  value={newPelada.local}
+                  onChange={(e) => setNewPelada({ ...newPelada, local: e.target.value })}
+                />
               </div>
-              {newPelada.daysOfWeek.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {newPelada.daysOfWeek.length} {newPelada.daysOfWeek.length === 1 ? 'dia selecionado' : 'dias selecionados'}
-                </p>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="horario">Horário</Label>
+                <TimeInput
+                  id="horario"
+                  value={newPelada.horario}
+                  onChange={(horario) => setNewPelada({ ...newPelada, horario })}
+                />
+              </div>
             </div>
+
+            <DayPicker
+              selected={newPelada.daysOfWeek}
+              onChange={(days) => setNewPelada({ ...newPelada, daysOfWeek: days })}
+            />
           </div>
 
           <DialogFooter>
@@ -515,7 +617,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
               variant="outline" 
               onClick={() => {
                 setIsCreateDialogOpen(false);
-                setNewPelada({ name: '', description: '', daysOfWeek: [] });
+                setNewPelada(novaPeladaVazia);
               }}
               className="border-2"
             >
@@ -523,10 +625,86 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
             </Button>
             <Button 
               onClick={handleCreatePelada} 
-              disabled={!newPelada.name || newPelada.daysOfWeek.length === 0}
+              disabled={!newPelada.name || newPelada.daysOfWeek.length === 0 || !horarioValido(newPelada.horario)}
               className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
             >
               Criar Pelada
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={editingPelada !== null} onOpenChange={(open) => { if (!open) setEditingPelada(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Pelada</DialogTitle>
+            <DialogDescription>
+              Altere as informações da sua pelada
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Nome da Pelada *</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Descrição</Label>
+              <Input
+                id="edit-description"
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-local">Local</Label>
+                <Input
+                  id="edit-local"
+                  placeholder="Ex: Quadra do bairro"
+                  value={editForm.local}
+                  onChange={(e) => setEditForm({ ...editForm, local: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-horario">Horário</Label>
+                <TimeInput
+                  id="edit-horario"
+                  value={editForm.horario}
+                  onChange={(horario) => setEditForm({ ...editForm, horario })}
+                />
+              </div>
+            </div>
+
+            <DayPicker
+              selected={editForm.daysOfWeek}
+              onChange={(days) => setEditForm({ ...editForm, daysOfWeek: days })}
+            />
+
+            {editError && <p className="text-sm text-destructive">{editError}</p>}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingPelada(null)}
+              className="border-2"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSalvarEdicao}
+              disabled={savingEdit || !editForm.name.trim() || editForm.daysOfWeek.length === 0 || !horarioValido(editForm.horario)}
+              className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
+            >
+              {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
             </Button>
           </DialogFooter>
         </DialogContent>

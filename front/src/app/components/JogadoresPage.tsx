@@ -108,21 +108,98 @@ function calculatePlayerRating(player: Player): number {
   return Math.max(0, Math.min(10, rating));
 }
 
+interface PlayerForm {
+  name: string;
+  age: string;
+  position: string;
+  number: string;
+}
+
+const emptyPlayerForm: PlayerForm = { name: '', age: '', position: '', number: '' };
+
+interface PlayerFieldsProps {
+  idPrefix: string;
+  form: PlayerForm;
+  onChange: (form: PlayerForm) => void;
+}
+
+// Campos do jogador, usados nos diálogos de adicionar e editar.
+function PlayerFields({ idPrefix, form, onChange }: PlayerFieldsProps) {
+  return (
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Name`}>Nome Completo</Label>
+        <Input
+          id={`${idPrefix}Name`}
+          placeholder="Ex: João da Silva"
+          value={form.name}
+          onChange={(e) => onChange({ ...form, name: e.target.value })}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor={`${idPrefix}Age`}>Idade</Label>
+          <Input
+            id={`${idPrefix}Age`}
+            type="number"
+            placeholder="Ex: 28"
+            value={form.age}
+            onChange={(e) => onChange({ ...form, age: e.target.value })}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor={`${idPrefix}Number`}>Número</Label>
+          <Input
+            id={`${idPrefix}Number`}
+            type="number"
+            placeholder="Ex: 10"
+            value={form.number}
+            onChange={(e) => onChange({ ...form, number: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Position`}>Posição</Label>
+        <Select
+          value={form.position}
+          onValueChange={(value) => onChange({ ...form, position: value })}
+        >
+          <SelectTrigger id={`${idPrefix}Position`}>
+            <SelectValue placeholder="Selecione a posição" />
+          </SelectTrigger>
+          <SelectContent>
+            {POSICOES.map((pos) => (
+              <SelectItem key={pos.sigla} value={pos.sigla}>{pos.nome}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+function formularioCompleto(form: PlayerForm): boolean {
+  return form.name.trim() !== '' && form.age !== '' && form.position !== '' && form.number !== '';
+}
+
 export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  
+
+  // Jogador que está sendo editado (null = diálogo de edição fechado)
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [editForm, setEditForm] = useState<PlayerForm>(emptyPlayerForm);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [newPlayer, setNewPlayer] = useState({
-    name: '',
-    age: '',
-    position: '',
-    number: ''
-  });
+  const [newPlayer, setNewPlayer] = useState<PlayerForm>(emptyPlayerForm);
 
   useEffect(() => {
     carregarJogadores();
@@ -157,9 +234,43 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
 
       setPlayers([...players, jogadorApiParaPlayer(jogadorCriado)]);
       setIsAddDialogOpen(false);
-      setNewPlayer({ name: '', age: '', position: '', number: '' });
+      setNewPlayer(emptyPlayerForm);
     } catch {
       setError("Não foi possível adicionar o jogador.");
+    }
+  }
+
+  function abrirEdicao(player: Player) {
+    setEditingPlayer(player);
+    setEditError(null);
+    setEditForm({
+      name: player.name,
+      age: String(player.age),
+      position: player.position,
+      number: String(player.number),
+    });
+  }
+
+  async function handleSavePlayer() {
+    if (!editingPlayer) return;
+
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      // Só manda os dados cadastrais: papel, status e estatísticas são mantidos pelo back.
+      const jogadorAtualizado = await api.put<JogadorApi>(`/peladas/${peladaId}/jogadores/${editingPlayer.id}`, {
+        name: editForm.name,
+        age: parseInt(editForm.age),
+        position: editForm.position,
+        number: parseInt(editForm.number),
+      });
+
+      setPlayers(players.map(p => p.id === editingPlayer.id ? jogadorApiParaPlayer(jogadorAtualizado) : p));
+      setEditingPlayer(null);
+    } catch (err) {
+      setEditError(err instanceof ApiError ? "Não foi possível salvar as alterações." : "Não foi possível conectar ao servidor.");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -412,7 +523,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
                     size="sm" 
                     variant="outline" 
                     className="flex-1"
-                    onClick={() => setSelectedPlayer(player)}
+                    onClick={() => abrirEdicao(player)}
                   >
                     <Edit className="h-3 w-3 mr-1" />
                     Editar
@@ -445,73 +556,58 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="playerName">Nome Completo</Label>
-              <Input
-                id="playerName"
-                placeholder="Ex: João da Silva"
-                value={newPlayer.name}
-                onChange={(e) => setNewPlayer({ ...newPlayer, name: e.target.value })}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="playerAge">Idade</Label>
-                <Input
-                  id="playerAge"
-                  type="number"
-                  placeholder="Ex: 28"
-                  value={newPlayer.age}
-                  onChange={(e) => setNewPlayer({ ...newPlayer, age: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="playerNumber">Número</Label>
-                <Input
-                  id="playerNumber"
-                  type="number"
-                  placeholder="Ex: 10"
-                  value={newPlayer.number}
-                  onChange={(e) => setNewPlayer({ ...newPlayer, number: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="playerPosition">Posição</Label>
-              <Select
-                value={newPlayer.position}
-                onValueChange={(value) => setNewPlayer({ ...newPlayer, position: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a posição" />
-                </SelectTrigger>
-                <SelectContent>
-                  {POSICOES.map((pos) => (
-                    <SelectItem key={pos.sigla} value={pos.sigla}>{pos.nome}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <PlayerFields idPrefix="player" form={newPlayer} onChange={setNewPlayer} />
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setIsAddDialogOpen(false)}
               className="border-2"
             >
               Cancelar
             </Button>
-            <Button 
-              onClick={handleAddPlayer} 
-              disabled={!newPlayer.name || !newPlayer.age || !newPlayer.position || !newPlayer.number}
+            <Button
+              onClick={handleAddPlayer}
+              disabled={!formularioCompleto(newPlayer)}
               className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
             >
               Adicionar Jogador
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Player Dialog */}
+      <Dialog open={editingPlayer !== null} onOpenChange={(open) => { if (!open) setEditingPlayer(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="h-5 w-5" />
+              Editar Jogador
+            </DialogTitle>
+            <DialogDescription>
+              Altere as informações do jogador
+            </DialogDescription>
+          </DialogHeader>
+
+          <PlayerFields idPrefix="editPlayer" form={editForm} onChange={setEditForm} />
+
+          {editError && <p className="text-sm text-destructive">{editError}</p>}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditingPlayer(null)}
+              className="border-2"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSavePlayer}
+              disabled={savingEdit || !formularioCompleto(editForm)}
+              className="bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
+            >
+              {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
             </Button>
           </DialogFooter>
         </DialogContent>

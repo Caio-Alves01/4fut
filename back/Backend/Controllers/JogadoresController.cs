@@ -78,17 +78,20 @@ namespace Backend.Controllers
             if (jogador is null)
                 return NotFound();
 
+            if (string.IsNullOrWhiteSpace(request.Name))
+                return BadRequest("O nome do jogador é obrigatório.");
+
             jogador.Name = request.Name.Trim();
             jogador.Age = request.Age;
             jogador.Position = request.Position;
             jogador.Number = request.Number;
-            jogador.Papel = request.Papel;
-            jogador.Status = request.Status;
-            jogador.Gols = request.Gols;
-            jogador.Assistencias = request.Assistencias;
-            jogador.CartoesAmarelos = request.CartoesAmarelos;
-            jogador.CartoesVermelhos = request.CartoesVermelhos;
-            jogador.Jogos = request.Jogos;
+            jogador.Papel = request.Papel ?? jogador.Papel;
+            jogador.Status = request.Status ?? jogador.Status;
+            jogador.Gols = request.Gols ?? jogador.Gols;
+            jogador.Assistencias = request.Assistencias ?? jogador.Assistencias;
+            jogador.CartoesAmarelos = request.CartoesAmarelos ?? jogador.CartoesAmarelos;
+            jogador.CartoesVermelhos = request.CartoesVermelhos ?? jogador.CartoesVermelhos;
+            jogador.Jogos = request.Jogos ?? jogador.Jogos;
 
             await _db.SaveChangesAsync();
 

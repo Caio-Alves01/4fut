@@ -106,8 +106,8 @@ namespace Backend.Controllers
                 Name = request.Name.Trim(),
                 Description = request.Description?.Trim() ?? "",
                 DaysOfWeek = string.Join(",", request.DaysOfWeek),
-                Local = "",
-                Horario = "",
+                Local = request.Local?.Trim() ?? "",
+                Horario = request.Horario?.Trim() ?? "",
                 Active = true,
                 CreatedAt = DateTime.UtcNow,
                 OwnerUserId = GetUserId(),
@@ -210,10 +210,22 @@ namespace Backend.Controllers
             if (pelada is null)
                 return NotFound();
 
+            if (string.IsNullOrWhiteSpace(request.Name))
+                return BadRequest("O nome da pelada é obrigatório.");
+
+            if (request.DaysOfWeek is not null && request.DaysOfWeek.Count == 0)
+                return BadRequest("Selecione ao menos um dia da semana.");
+
             pelada.Name = request.Name.Trim();
             pelada.Description = request.Description?.Trim() ?? "";
             pelada.Local = request.Local?.Trim() ?? "";
             pelada.Horario = request.Horario?.Trim() ?? "";
+
+            if (request.DaysOfWeek is not null)
+                pelada.DaysOfWeek = string.Join(",", request.DaysOfWeek);
+
+            if (request.Active is not null)
+                pelada.Active = request.Active.Value;
 
             await _db.SaveChangesAsync();
 

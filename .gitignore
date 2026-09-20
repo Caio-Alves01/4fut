@@ -12,3 +12,4 @@ back/Backend/Backend.csproj.user
 
 # temp
 front/src/app/App.full.tsx.bak
+back/Backend/emails-dev/

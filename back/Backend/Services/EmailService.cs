@@ -24,8 +24,14 @@ namespace Backend.Services
 
             if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
             {
-                // Sem SMTP configurado (ex: ambiente de dev sem credencial ainda): só mostra no console.
-                Console.WriteLine($"[EmailService] SMTP não configurado. E-mail para {to}: {subject}\n{body}");
+                // Sem SMTP configurado (ex: ambiente de dev sem credencial ainda): grava o e-mail
+                // em um arquivo .txt na pasta "emails-dev" e mostra no console.
+                var pasta = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "emails-dev");
+                Directory.CreateDirectory(pasta);
+                var arquivo = Path.GetFullPath(Path.Combine(pasta, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}.txt"));
+                await File.WriteAllTextAsync(arquivo, $"Para: {to}\nAssunto: {subject}\n\n{body}\n");
+
+                Console.WriteLine($"[EmailService] SMTP não configurado. E-mail para {to} salvo em {arquivo}\n{body}");
                 return;
             }
 

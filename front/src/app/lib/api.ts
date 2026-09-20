@@ -30,8 +30,10 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     throw new ApiError(res.status, body || res.statusText);
   }
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  // 204 ou 200 sem corpo (ex: Ok() do ASP.NET): não há JSON para ler.
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export const api = {
