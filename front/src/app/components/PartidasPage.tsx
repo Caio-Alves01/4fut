@@ -22,11 +22,12 @@ import {
   X,
   AlertTriangle,
   AlertCircle,
-  Save,
   CheckCircle2,
   HelpCircle,
   XCircle,
-  ClipboardList
+  ClipboardList,
+  Trash2,
+  Flag
 } from 'lucide-react';
 import {
   Dialog,
@@ -44,26 +45,40 @@ import {
   SelectValue,
 } from './ui/select';
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { EscalacaoCartolaPage } from './EscalacaoCartolaPage';
 import { api, ApiError } from '../lib/api';
 
+// Formatos devolvidos por GET /partidas/{id}/detalhes (presença e eventos ficam salvos no back).
 interface GameEvent {
   id: number;
-  type: 'gol' | 'amarelo' | 'vermelho';
-  player: string;
+  tipo: 'gol' | 'amarelo' | 'vermelho';
+  jogadorId: number;
+  jogadorNome: string;
   /** Jogador que deu a assistência (apenas para eventos do tipo 'gol') */
-  assistPlayer?: string;
-  minute: number;
-  team: 1 | 2;
+  assistJogadorId: number | null;
+  assistJogadorNome: string | null;
+  minuto: number;
+  time: 1 | 2;
 }
 
 interface Presenca {
   jogadorId: number;
   nome: string;
+  tipoJogador: string; // mensalista | avulso
   confirmacao: 'confirmado' | 'pendente' | 'recusado';
-  /** Preenchido só depois da partida: compareceu de fato? */
-  presente: boolean | null;
+  /** Só pode ser marcado depois da partida finalizada: compareceu de fato? */
+  presente: boolean;
 }
 
 interface Match {
@@ -76,28 +91,17 @@ interface Match {
   scoreTeam2?: number;
   team1Players?: number;
   team2Players?: number;
-  events?: GameEvent[];
-  presencas?: Presenca[];
+}
+
+interface PartidaDetalhes {
+  partida: Match;
+  presencas: Presenca[];
+  eventos: GameEvent[];
 }
 
 interface PartidasPageProps {
   peladaId: number;
   onNavigate: (page: string, peladaId?: number) => void;
-}
-
-// Elenco padrão da pelada usado para inicializar as confirmações de presença.
-const ELENCO_PELADA = [
-  'João Silva', 'Pedro Santos', 'Carlos Lima', 'Rafael Costa', 'André Souza',
-  'Fernando Silva', 'Roberto Lima', 'Marcos Santos', 'Diego Costa', 'Luis Fernandes', 'Gabriel Rocha'
-];
-
-function defaultPresencas(): Presenca[] {
-  return ELENCO_PELADA.map((nome, index) => ({
-    jogadorId: index + 1,
-    nome,
-    confirmacao: 'pendente',
-    presente: null
-  }));
 }
 
 // Badge visual pro status de confirmação de presença de um jogador.
@@ -245,6 +249,12 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
   const [newMatch, setNewMatch] = useState<MatchForm>(emptyMatchForm);
 
+  // Presença e eventos da partida aberta (carregados do back ao abrir a partida).
+  const [detalhes, setDetalhes] = useState<PartidaDetalhes | null>(null);
+  const [detalhesError, setDetalhesError] = useState<string | null>(null);
+  const [confirmarFinalizacao, setConfirmarFinalizacao] = useState(false);
+  const [finalizando, setFinalizando] = useState(false);
+
 
   // Erros de data no passado. Na edição só vale se o usuário mudou data ou horário
   // (uma partida antiga ainda agendada pode ter o local corrigido sem mexer na data).
@@ -270,13 +280,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
         location: newMatch.location,
       });
 
-      const match: Match = {
-        ...partidaCriada,
-        events: [],
-        presencas: defaultPresencas()
-      };
-
-      setMatches([...matches, match]);
+      setMatches([...matches, partidaCriada]);
       setIsCreateDialogOpen(false);
       setNewMatch(emptyMatchForm);
     } catch (err) {
@@ -311,8 +315,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
         scoreTeam2: editingMatch.scoreTeam2 ?? null,
       });
 
-      // Mantém eventos e presenças que só existem no front por enquanto.
-      setMatches(matches.map(m => m.id === editingMatch.id ? { ...m, ...partidaAtualizada } : m));
+      setMatches(matches.map(m => m.id === editingMatch.id ? partidaAtualizada : m));
       setEditingMatch(null);
     } catch (err) {
       setEditError(err instanceof ApiError ? 'Não foi possível salvar as alterações.' : 'Não foi possível conectar ao servidor.');
@@ -328,96 +331,127 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     return 'pendente';
   }
 
-  // Cada handler abaixo faz o mesmo passo a passo: pega a lista de presença
-  // atual, monta a lista nova já atualizada, e salva essa lista nos dois
-  // lugares que o protótipo guarda o estado (selectedMatch e matches).
-  function handleToggleConfirmacao(jogadorId: number) {
-    if (!selectedMatch) return;
-
-    const presencaAtual = selectedMatch.presencas || defaultPresencas();
-    const novaPresenca = presencaAtual.map((p) => {
-      if (p.jogadorId !== jogadorId) return p;
-      return { ...p, confirmacao: nextConfirmacao(p.confirmacao) };
-    });
-    const matchAtualizada = { ...selectedMatch, presencas: novaPresenca };
-
-    setSelectedMatch(matchAtualizada);
-    setMatches(matches.map((m) => (m.id === matchAtualizada.id ? matchAtualizada : m)));
+  // Mensagem do back (400 com texto) ou uma genérica.
+  function mensagemDeErro(err: unknown, padrao: string): string {
+    if (!(err instanceof ApiError)) return 'Não foi possível conectar ao servidor.';
+    return err.status === 400 && err.message && !err.message.startsWith('{') ? err.message : padrao;
   }
 
-  function handleTogglePresente(jogadorId: number) {
-    if (!selectedMatch) return;
-
-    const presencaAtual = selectedMatch.presencas || defaultPresencas();
-    const novaPresenca = presencaAtual.map((p) => {
-      if (p.jogadorId !== jogadorId) return p;
-      return { ...p, presente: !p.presente };
-    });
-    const matchAtualizada = { ...selectedMatch, presencas: novaPresenca };
-
-    setSelectedMatch(matchAtualizada);
-    setMatches(matches.map((m) => (m.id === matchAtualizada.id ? matchAtualizada : m)));
+  // Atualiza a partida na tela de detalhes e na lista (placar e status vêm do back).
+  function aplicarPartida(partida: Match) {
+    setSelectedMatch(partida);
+    setMatches((atuais) => atuais.map((m) => (m.id === partida.id ? partida : m)));
   }
 
-  const [newEvent, setNewEvent] = useState({
-    type: 'gol' as GameEvent['type'],
-    player: '',
-    assistPlayer: '',
-    team: '1' as '1' | '2',
-    minute: ''
-  });
-
-  function handleAddEvent() {
-    if (!selectedMatch) return;
-    if (!newEvent.player || !newEvent.minute) return;
-
-    let assistPlayer: string | undefined = undefined;
-    if (newEvent.type === 'gol' && newEvent.assistPlayer) {
-      assistPlayer = newEvent.assistPlayer;
-    }
-
-    let team: 1 | 2 = 1;
-    if (newEvent.team === '2') team = 2;
-
-    const eventosAtuais = selectedMatch.events || [];
-    const novoEvento: GameEvent = {
-      id: eventosAtuais.length + 1 + Math.floor(Math.random() * 1000),
-      type: newEvent.type,
-      player: newEvent.player,
-      assistPlayer,
-      minute: parseInt(newEvent.minute),
-      team
-    };
-
-    const eventos = [...eventosAtuais, novoEvento].sort((a, b) => a.minute - b.minute);
-
-    let scoreTeam1 = selectedMatch.scoreTeam1 || 0;
-    let scoreTeam2 = selectedMatch.scoreTeam2 || 0;
-    if (novoEvento.type === 'gol') {
-      if (novoEvento.team === 1) scoreTeam1 += 1;
-      else scoreTeam2 += 1;
-    }
-
-    const matchAtualizada = { ...selectedMatch, events: eventos, scoreTeam1, scoreTeam2 };
-    setSelectedMatch(matchAtualizada);
-    setMatches(matches.map((m) => (m.id === matchAtualizada.id ? matchAtualizada : m)));
-
-    setNewEvent({ type: 'gol', player: '', assistPlayer: '', team: '1', minute: '' });
-  }
-
-  // Persiste no back-end a data/hora/local/status/placar atual da partida selecionada.
-  async function handleSalvarPartida(match: Match) {
+  async function carregarDetalhes(partidaId: number) {
+    setDetalhesError(null);
     try {
-      await api.put(`/peladas/${peladaId}/partidas/${match.id}`, {
-        date: match.date,
-        time: match.time,
-        location: match.location,
-        status: match.status,
-        scoreTeam1: match.scoreTeam1 ?? null,
-        scoreTeam2: match.scoreTeam2 ?? null,
+      const dados = await api.get<PartidaDetalhes>(`/peladas/${peladaId}/partidas/${partidaId}/detalhes`);
+      setDetalhes(dados);
+      aplicarPartida(dados.partida);
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível carregar a presença e os eventos da partida.'));
+    }
+  }
+
+  function abrirPartida(match: Match) {
+    setSelectedMatch(match);
+    setDetalhes(null);
+    setShowEscalacao(true);
+    carregarDetalhes(match.id);
+  }
+
+  // Salva a presença de um jogador. Avulso marcado como presente gera cobrança no financeiro.
+  async function salvarPresenca(presenca: Presenca, mudanca: Partial<Pick<Presenca, 'confirmacao' | 'presente'>>) {
+    if (!selectedMatch || !detalhes) return;
+
+    const nova = { ...presenca, ...mudanca };
+    setDetalhesError(null);
+    try {
+      const salva = await api.put<Presenca>(
+        `/peladas/${peladaId}/partidas/${selectedMatch.id}/presencas/${presenca.jogadorId}`,
+        { confirmacao: nova.confirmacao, presente: nova.presente },
+      );
+      setDetalhes({
+        ...detalhes,
+        presencas: detalhes.presencas.map((p) => (p.jogadorId === salva.jogadorId ? salva : p)),
       });
     } catch (err) {
-      setError(err instanceof ApiError ? 'Não foi possível salvar a partida.' : 'Não foi possível conectar ao servidor.');
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível salvar a presença.'));
+    }
+  }
+
+  function handleToggleConfirmacao(presenca: Presenca) {
+    salvarPresenca(presenca, { confirmacao: nextConfirmacao(presenca.confirmacao) });
+  }
+
+  function handleTogglePresente(presenca: Presenca) {
+    salvarPresenca(presenca, { presente: !presenca.presente });
+  }
+
+  // Ids guardados como string porque é o que o <Select> trabalha.
+  const [newEvent, setNewEvent] = useState({
+    tipo: 'gol' as GameEvent['tipo'],
+    jogadorId: '',
+    assistJogadorId: '',
+    time: '1' as '1' | '2',
+    minuto: ''
+  });
+
+  // Registra o evento no back; cartão gera multa no financeiro e gol atualiza o placar.
+  async function handleAddEvent() {
+    if (!selectedMatch) return;
+    if (!newEvent.jogadorId || !newEvent.minuto) return;
+
+    setDetalhesError(null);
+    try {
+      await api.post(`/peladas/${peladaId}/partidas/${selectedMatch.id}/eventos`, {
+        tipo: newEvent.tipo,
+        jogadorId: Number(newEvent.jogadorId),
+        assistJogadorId: newEvent.tipo === 'gol' && newEvent.assistJogadorId ? Number(newEvent.assistJogadorId) : null,
+        minuto: parseInt(newEvent.minuto),
+        time: Number(newEvent.time),
+      });
+      setNewEvent({ tipo: 'gol', jogadorId: '', assistJogadorId: '', time: '1', minuto: '' });
+      await carregarDetalhes(selectedMatch.id);
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível registrar o evento.'));
+    }
+  }
+
+  async function handleRemoverEvento(eventoId: number) {
+    if (!selectedMatch) return;
+
+    setDetalhesError(null);
+    try {
+      await api.delete(`/peladas/${peladaId}/partidas/${selectedMatch.id}/eventos/${eventoId}`);
+      await carregarDetalhes(selectedMatch.id);
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível remover o evento.'));
+    }
+  }
+
+  // Finalizar libera a marcação de quem compareceu (e com ela a cobrança dos avulsos).
+  async function handleFinalizarPartida() {
+    if (!selectedMatch) return;
+
+    setFinalizando(true);
+    setDetalhesError(null);
+    try {
+      await api.put<Match>(`/peladas/${peladaId}/partidas/${selectedMatch.id}`, {
+        date: selectedMatch.date,
+        time: selectedMatch.time,
+        location: selectedMatch.location,
+        status: 'finalizada',
+        scoreTeam1: selectedMatch.scoreTeam1 ?? null,
+        scoreTeam2: selectedMatch.scoreTeam2 ?? null,
+      });
+      setConfirmarFinalizacao(false);
+      await carregarDetalhes(selectedMatch.id);
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível finalizar a partida.'));
+    } finally {
+      setFinalizando(false);
     }
   }
 
@@ -439,8 +473,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   }
 
   if (showEscalacao && selectedMatch) {
-    const presencas = selectedMatch.presencas || defaultPresencas();
-    const roster = presencas.map(p => p.nome);
+    const presencas = detalhes?.presencas ?? [];
+    const eventos = detalhes?.eventos ?? [];
 
     return (
       <div className="space-y-6">
@@ -463,14 +497,42 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               })} às {selectedMatch.time} - {selectedMatch.location}
             </p>
           </div>
-          <Button
-            className="flex items-center gap-2 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
-            onClick={() => handleSalvarPartida(selectedMatch)}
-          >
-            <Save className="h-4 w-4" />
-            Salvar Partida
-          </Button>
+          {selectedMatch.status !== 'finalizada' ? (
+            <Button
+              className="flex items-center gap-2 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
+              onClick={() => setConfirmarFinalizacao(true)}
+            >
+              <Flag className="h-4 w-4" />
+              Finalizar Partida
+            </Button>
+          ) : (
+            getStatusBadge(selectedMatch.status)
+          )}
         </div>
+
+        {detalhesError && <p className="text-sm text-destructive">{detalhesError}</p>}
+        {!detalhes && !detalhesError && <p className="text-muted-foreground">Carregando presença e eventos...</p>}
+
+        <AlertDialog open={confirmarFinalizacao} onOpenChange={(open) => { if (!finalizando) setConfirmarFinalizacao(open); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Finalizar partida?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Depois de finalizar, marque na aba Presença quem compareceu. Avulsos marcados como presentes
+                geram cobrança automaticamente no financeiro.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={finalizando}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); handleFinalizarPartida(); }}
+                disabled={finalizando}
+              >
+                {finalizando ? 'Finalizando...' : 'Finalizar'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Match Score Summary */}
         <Card className="border-2 shadow-lg">
@@ -505,14 +567,14 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               <div className="text-center p-4 bg-yellow-50 rounded-lg">
                 <div className="w-6 h-8 bg-yellow-400 border-2 border-yellow-600 rounded-sm mx-auto mb-2"></div>
                 <p className="text-3xl font-bold text-yellow-700">
-                  {(selectedMatch.events || []).filter(e => e.type === 'amarelo').length}
+                  {eventos.filter(e => e.tipo === 'amarelo').length}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">Amarelos</p>
               </div>
               <div className="text-center p-4 bg-red-50 rounded-lg">
                 <div className="w-6 h-8 bg-red-600 border-2 border-red-800 rounded-sm mx-auto mb-2"></div>
                 <p className="text-3xl font-bold text-red-700">
-                  {(selectedMatch.events || []).filter(e => e.type === 'vermelho').length}
+                  {eventos.filter(e => e.tipo === 'vermelho').length}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">Vermelhos</p>
               </div>
@@ -557,13 +619,21 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
+                  {detalhes && presencas.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-6">
+                      Nenhum jogador ativo nesta pelada. Cadastre jogadores na aba Jogadores.
+                    </p>
+                  )}
                   {presencas.map((p) => (
                     <div key={p.jogadorId} className="flex items-center justify-between p-3 border rounded-lg gap-4 flex-wrap">
-                      <span className="font-medium">{p.nome}</span>
+                      <span className="font-medium flex items-center gap-2">
+                        {p.nome}
+                        {p.tipoJogador === 'avulso' && <Badge variant="outline">Avulso</Badge>}
+                      </span>
                       <div className="flex items-center gap-4">
                         <button
                           type="button"
-                          onClick={() => handleToggleConfirmacao(p.jogadorId)}
+                          onClick={() => handleToggleConfirmacao(p)}
                           className="cursor-pointer"
                           title="Clique para alternar a confirmação"
                         >
@@ -571,9 +641,9 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                         </button>
                         <div className="flex items-center gap-2">
                           <Switch
-                            checked={!!p.presente}
+                            checked={p.presente}
                             disabled={selectedMatch.status !== 'finalizada'}
-                            onCheckedChange={() => handleTogglePresente(p.jogadorId)}
+                            onCheckedChange={() => handleTogglePresente(p)}
                           />
                           <Label className="text-sm text-muted-foreground">Presente</Label>
                         </div>
@@ -581,9 +651,13 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                     </div>
                   ))}
                 </div>
-                {selectedMatch.status !== 'finalizada' && (
+                {selectedMatch.status !== 'finalizada' ? (
                   <p className="text-xs text-muted-foreground mt-3">
                     A confirmação de presença real (compareceu) só fica disponível após a partida ser finalizada.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-3">
+                    Avulsos marcados como presentes geram cobrança na aba "A receber" das finanças.
                   </p>
                 )}
               </CardContent>
@@ -629,8 +703,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   <div className="space-y-2">
                     <Label>Tipo</Label>
                     <Select
-                      value={newEvent.type}
-                      onValueChange={(value: GameEvent['type']) => setNewEvent({ ...newEvent, type: value, assistPlayer: '' })}
+                      value={newEvent.tipo}
+                      onValueChange={(value: GameEvent['tipo']) => setNewEvent({ ...newEvent, tipo: value, assistJogadorId: '' })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -646,34 +720,34 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   <div className="space-y-2">
                     <Label>Jogador</Label>
                     <Select
-                      value={newEvent.player}
-                      onValueChange={(value) => setNewEvent({ ...newEvent, player: value })}
+                      value={newEvent.jogadorId}
+                      onValueChange={(value) => setNewEvent({ ...newEvent, jogadorId: value })}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecione" />
                       </SelectTrigger>
                       <SelectContent>
-                        {roster.map((nome) => (
-                          <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                        {presencas.map((p) => (
+                          <SelectItem key={p.jogadorId} value={String(p.jogadorId)}>{p.nome}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {newEvent.type === 'gol' && (
+                  {newEvent.tipo === 'gol' && (
                     <div className="space-y-2">
                       <Label>Assistência (opcional)</Label>
                       <Select
-                        value={newEvent.assistPlayer || 'none'}
-                        onValueChange={(value) => setNewEvent({ ...newEvent, assistPlayer: value === 'none' ? '' : value })}
+                        value={newEvent.assistJogadorId || 'none'}
+                        onValueChange={(value) => setNewEvent({ ...newEvent, assistJogadorId: value === 'none' ? '' : value })}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Sem assistência" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Sem assistência</SelectItem>
-                          {roster.filter(n => n !== newEvent.player).map((nome) => (
-                            <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                          {presencas.filter(p => String(p.jogadorId) !== newEvent.jogadorId).map((p) => (
+                            <SelectItem key={p.jogadorId} value={String(p.jogadorId)}>{p.nome}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -683,8 +757,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   <div className="space-y-2">
                     <Label>Time</Label>
                     <Select
-                      value={newEvent.team}
-                      onValueChange={(value: '1' | '2') => setNewEvent({ ...newEvent, team: value })}
+                      value={newEvent.time}
+                      onValueChange={(value: '1' | '2') => setNewEvent({ ...newEvent, time: value })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -700,15 +774,16 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                     <Label>Minuto</Label>
                     <Input
                       type="number"
+                      min={0}
                       placeholder="Ex: 23"
-                      value={newEvent.minute}
-                      onChange={(e) => setNewEvent({ ...newEvent, minute: e.target.value })}
+                      value={newEvent.minuto}
+                      onChange={(e) => setNewEvent({ ...newEvent, minuto: e.target.value })}
                     />
                   </div>
                 </div>
                 <Button
                   className="mt-4 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
-                  disabled={!newEvent.player || !newEvent.minute}
+                  disabled={!detalhes || !newEvent.jogadorId || !newEvent.minuto}
                   onClick={handleAddEvent}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -723,28 +798,40 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {(selectedMatch.events || []).length === 0 && (
+                  {eventos.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-6">
                       Nenhum evento registrado ainda.
                     </p>
                   )}
-                  {(selectedMatch.events || []).map((event) => (
+                  {eventos.map((event) => (
                     <div key={event.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
-                        <Badge variant="outline">{event.minute}'</Badge>
-                        {event.type === 'gol' && <span>⚽</span>}
-                        {event.type === 'amarelo' && <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>}
-                        {event.type === 'vermelho' && <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>}
+                        <Badge variant="outline">{event.minuto}'</Badge>
+                        {event.tipo === 'gol' && <span>⚽</span>}
+                        {event.tipo === 'amarelo' && <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>}
+                        {event.tipo === 'vermelho' && <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>}
                         <div>
                           <p className="font-medium">
-                            {event.player}
-                            {event.assistPlayer && (
-                              <span className="text-sm text-muted-foreground"> (assist: {event.assistPlayer})</span>
+                            {event.jogadorNome}
+                            {event.assistJogadorNome && (
+                              <span className="text-sm text-muted-foreground"> (assist: {event.assistJogadorNome})</span>
                             )}
                           </p>
                         </div>
                       </div>
-                      <Badge variant="secondary">Time {event.team}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">Time {event.time}</Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10"
+                          aria-label="Remover evento"
+                          title="Remover evento (cancela a multa do cartão, se ainda não foi paga)"
+                          onClick={() => handleRemoverEvento(event.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -863,10 +950,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   <div className="flex gap-2 pt-3 border-t">
                     <Button 
                       className="flex-1 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
-                      onClick={() => {
-                        setSelectedMatch(match);
-                        setShowEscalacao(true);
-                      }}
+                      onClick={() => abrirPartida(match)}
                     >
                       Montar Escalação
                     </Button>
@@ -930,10 +1014,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                         variant="outline" 
                         size="sm"
                         className="border-2 hover:bg-primary hover:text-white hover:border-primary transition-colors"
-                        onClick={() => {
-                          setSelectedMatch(match);
-                          setShowEscalacao(true);
-                        }}
+                        onClick={() => abrirPartida(match)}
                       >
                         <Eye className="h-4 w-4 mr-2" />
                         Ver Detalhes

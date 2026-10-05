@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Backend.Data;
 using Backend.DTOs;
 using Backend.Models;
+using Backend.Services;
 
 namespace Backend.Controllers
 {
@@ -14,10 +15,12 @@ namespace Backend.Controllers
     public class PeladasController : ControllerBase
     {
         private readonly AppDbContext _db;
+        private readonly FinanceiroService _financeiro;
 
-        public PeladasController(AppDbContext db)
+        public PeladasController(AppDbContext db, FinanceiroService financeiro)
         {
             _db = db;
+            _financeiro = financeiro;
         }
 
         private int GetUserId()
@@ -180,7 +183,9 @@ namespace Backend.Controllers
                     maisIndisciplinado = new MaisIndisciplinadoInfo(maisCartoes.Name, maisCartoes.CartoesAmarelos, maisCartoes.CartoesVermelhos, total);
             }
 
-            var inadimplentes = jogadores.Count(j => j.Status == "inadimplente");
+            // Jogadores com alguma coisa a receber (mensalidade em aberto, avulso ou cartão não pago).
+            var aReceber = await _financeiro.CalcularAReceberAsync(pelada);
+            var inadimplentes = aReceber.Select(i => i.JogadorId).Distinct().Count();
 
             var destaques = new DestaquesInfo(artilheiro, melhorJogador, maisIndisciplinado, inadimplentes);
 

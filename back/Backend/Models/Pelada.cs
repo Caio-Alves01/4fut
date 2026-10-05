@@ -16,5 +16,12 @@ namespace Backend.Models
 
         // Dono da pelada (quem criou) — só ele pode gerenciar por enquanto.
         public int OwnerUserId { get; set; }
+
+        // Valores usados pelo financeiro para gerar cobranças (configurados na aba de finanças).
+        // Valor 0 = não cobra (ex: pelada sem multa por cartão).
+        public decimal ValorMensalidade { get; set; }
+        public decimal ValorAvulso { get; set; }          // por partida em que o avulso esteve presente
+        public decimal ValorCartaoAmarelo { get; set; }
+        public decimal ValorCartaoVermelho { get; set; }
     }
 }

@@ -4,6 +4,7 @@ using Backend.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Backend.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261004235439_AddJogadorTipo")]
+    partial class AddJogadorTipo
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,55 +24,6 @@ namespace Backend.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 64);
 
             MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
-
-            modelBuilder.Entity("Backend.Models.Cobranca", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("Data")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Descricao")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)");
-
-                    b.Property<int?>("EventoId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("JogadorId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly?>("PagoEm")
-                        .HasColumnType("date");
-
-                    b.Property<int?>("PartidaId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PeladaId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Tipo")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)");
-
-                    b.Property<int?>("TransacaoId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Valor")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PeladaId");
-
-                    b.ToTable("Cobrancas");
-                });
 
             modelBuilder.Entity("Backend.Models.Jogador", b =>
                 {
@@ -93,11 +47,6 @@ namespace Backend.Migrations
 
                     b.Property<int>("CartoesVermelhos")
                         .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime(6)")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
 
                     b.Property<int>("Gols")
                         .HasColumnType("int");
@@ -141,45 +90,6 @@ namespace Backend.Migrations
                     b.ToTable("Jogadores");
                 });
 
-            modelBuilder.Entity("Backend.Models.MensalidadePagamento", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("Ano")
-                        .HasColumnType("int");
-
-                    b.Property<int>("JogadorId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Mes")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("PagoEm")
-                        .HasColumnType("date");
-
-                    b.Property<int>("PeladaId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("TransacaoId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Valor")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PeladaId");
-
-                    b.HasIndex("JogadorId", "Ano", "Mes")
-                        .IsUnique();
-
-                    b.ToTable("MensalidadePagamentos");
-                });
-
             modelBuilder.Entity("Backend.Models.Partida", b =>
                 {
                     b.Property<int>("Id")
@@ -219,71 +129,6 @@ namespace Backend.Migrations
                     b.ToTable("Partidas");
                 });
 
-            modelBuilder.Entity("Backend.Models.PartidaEvento", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("AssistJogadorId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("JogadorId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Minuto")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PartidaId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Time")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Tipo")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PartidaId");
-
-                    b.ToTable("PartidaEventos");
-                });
-
-            modelBuilder.Entity("Backend.Models.PartidaPresenca", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Confirmacao")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)");
-
-                    b.Property<int>("JogadorId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PartidaId")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("Presente")
-                        .HasColumnType("tinyint(1)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PartidaId", "JogadorId")
-                        .IsUnique();
-
-                    b.ToTable("PartidaPresencas");
-                });
-
             modelBuilder.Entity("Backend.Models.Pelada", b =>
                 {
                     b.Property<int>("Id")
@@ -320,18 +165,6 @@ namespace Backend.Migrations
 
                     b.Property<int>("OwnerUserId")
                         .HasColumnType("int");
-
-                    b.Property<decimal>("ValorAvulso")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("ValorCartaoAmarelo")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("ValorCartaoVermelho")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("ValorMensalidade")
-                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 

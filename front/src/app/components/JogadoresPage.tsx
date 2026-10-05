@@ -25,6 +25,16 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -35,14 +45,51 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { POSICOES, posicaoNome, posicaoCorClasses } from './positions';
 import { api, ApiError } from '../lib/api';
 
+// Whitelist do tipo de jogador. Precisa bater com o back (Models/TiposJogador.cs).
+const TIPOS_JOGADOR = [
+  { valor: 'mensalista', nome: 'Mensalista' },
+  { valor: 'avulso', nome: 'Avulso' },
+] as const;
+
+type TipoJogador = (typeof TIPOS_JOGADOR)[number]['valor'];
+
+function tipoNome(tipo: string): string {
+  return TIPOS_JOGADOR.find((t) => t.valor === tipo)?.nome ?? tipo;
+}
+
+function ehTipoValido(tipo: string): tipo is TipoJogador {
+  return TIPOS_JOGADOR.some((t) => t.valor === tipo);
+}
+
+// Whitelist do status do jogador. Precisa bater com o back (Models/StatusJogador.cs).
+const STATUS_JOGADOR = [
+  { valor: 'ativo', nome: 'Ativo', classes: 'bg-green-100 text-green-800' },
+  { valor: 'licenca', nome: 'De licença', classes: 'bg-yellow-100 text-yellow-800' },
+  { valor: 'inativo', nome: 'Inativo', classes: 'bg-gray-200 text-gray-700' },
+] as const;
+
+type StatusJogador = (typeof STATUS_JOGADOR)[number]['valor'];
+
+function ehStatusValido(status: string): status is StatusJogador {
+  return STATUS_JOGADOR.some((st) => st.valor === status);
+}
+
+function statusInfo(status: StatusJogador) {
+  return STATUS_JOGADOR.find((st) => st.valor === status)!;
+}
+
 interface Player {
   id: number;
   name: string;
   age: number;
+  /** "yyyy-MM-dd"; null em jogadores cadastrados antes da data de nascimento existir */
+  birthDate: string | null;
   /** Sigla da posição, referenciando o catálogo Posicoes (GOL/ZAG/LAT/VOL/MEI/ATA/PON) */
   position: string;
   photo?: string;
   number: number;
+  tipo: TipoJogador;
+  status: StatusJogador;
   stats: {
     gols: number;
     assistencias: number;
@@ -62,8 +109,11 @@ interface JogadorApi {
   id: number;
   name: string;
   age: number;
+  birthDate: string | null;
   position: string;
   number: number;
+  tipo: string;
+  status: string;
   gols: number;
   assistencias: number;
   cartoesAmarelos: number;
@@ -76,8 +126,12 @@ function jogadorApiParaPlayer(jogador: JogadorApi): Player {
     id: jogador.id,
     name: jogador.name,
     age: jogador.age,
+    birthDate: jogador.birthDate,
     position: jogador.position,
     number: jogador.number,
+    // Valor fora da whitelist não deveria vir do back; se vier, trata como mensalista (padrão do banco).
+    tipo: ehTipoValido(jogador.tipo) ? jogador.tipo : 'mensalista',
+    status: ehStatusValido(jogador.status) ? jogador.status : 'ativo',
     stats: {
       gols: jogador.gols,
       assistencias: jogador.assistencias,
@@ -110,12 +164,45 @@ function calculatePlayerRating(player: Player): number {
 
 interface PlayerForm {
   name: string;
-  age: string;
+  birthDate: string;
   position: string;
   number: string;
+  tipo: TipoJogador | '';
+  status: StatusJogador;
 }
 
-const emptyPlayerForm: PlayerForm = { name: '', age: '', position: '', number: '' };
+const emptyPlayerForm: PlayerForm = { name: '', birthDate: '', position: '', number: '', tipo: '', status: 'ativo' };
+
+const IDADE_MINIMA = 18;
+
+// Mesma conta do back (Services/Idade.cs): anos completos até hoje.
+function calcularIdade(birthDate: string): number {
+  const [ano, mes, dia] = birthDate.split('-').map(Number);
+  const hoje = new Date();
+  let idade = hoje.getFullYear() - ano;
+  if (hoje.getMonth() + 1 < mes || (hoje.getMonth() + 1 === mes && hoje.getDate() < dia)) idade--;
+  return idade;
+}
+
+// Data mais recente permitida no campo: quem nasceu nesse dia faz 18 anos hoje.
+function dataMaximaNascimento(): string {
+  const hoje = new Date();
+  const limite = new Date(hoje.getFullYear() - IDADE_MINIMA, hoje.getMonth(), hoje.getDate());
+  const mm = String(limite.getMonth() + 1).padStart(2, '0');
+  const dd = String(limite.getDate()).padStart(2, '0');
+  return `${limite.getFullYear()}-${mm}-${dd}`;
+}
+
+// Erro de validação de um campo já preenchido (campos vazios só desabilitam o botão).
+function erroDoFormulario(form: PlayerForm): string | null {
+  if (form.birthDate && calcularIdade(form.birthDate) < IDADE_MINIMA) {
+    return `O jogador precisa ter ${IDADE_MINIMA} anos ou mais.`;
+  }
+  if (form.number && !/^\d+$/.test(form.number)) {
+    return 'O número da camisa deve ser um número inteiro, sem sinal de negativo.';
+  }
+  return null;
+}
 
 interface PlayerFieldsProps {
   idPrefix: string;
@@ -139,13 +226,13 @@ function PlayerFields({ idPrefix, form, onChange }: PlayerFieldsProps) {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor={`${idPrefix}Age`}>Idade</Label>
+          <Label htmlFor={`${idPrefix}BirthDate`}>Data de Nascimento</Label>
           <Input
-            id={`${idPrefix}Age`}
-            type="number"
-            placeholder="Ex: 28"
-            value={form.age}
-            onChange={(e) => onChange({ ...form, age: e.target.value })}
+            id={`${idPrefix}BirthDate`}
+            type="date"
+            max={dataMaximaNascimento()}
+            value={form.birthDate}
+            onChange={(e) => onChange({ ...form, birthDate: e.target.value })}
           />
         </div>
 
@@ -154,6 +241,8 @@ function PlayerFields({ idPrefix, form, onChange }: PlayerFieldsProps) {
           <Input
             id={`${idPrefix}Number`}
             type="number"
+            min={0}
+            step={1}
             placeholder="Ex: 10"
             value={form.number}
             onChange={(e) => onChange({ ...form, number: e.target.value })}
@@ -177,12 +266,58 @@ function PlayerFields({ idPrefix, form, onChange }: PlayerFieldsProps) {
           </SelectContent>
         </Select>
       </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor={`${idPrefix}Tipo`}>Tipo</Label>
+          <Select
+            value={form.tipo}
+            onValueChange={(value) => { if (ehTipoValido(value)) onChange({ ...form, tipo: value }); }}
+          >
+            <SelectTrigger id={`${idPrefix}Tipo`}>
+              <SelectValue placeholder="Mensalista ou avulso" />
+            </SelectTrigger>
+            <SelectContent>
+              {TIPOS_JOGADOR.map((t) => (
+                <SelectItem key={t.valor} value={t.valor}>{t.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor={`${idPrefix}Status`}>Status</Label>
+          <Select
+            value={form.status}
+            onValueChange={(value) => { if (ehStatusValido(value)) onChange({ ...form, status: value }); }}
+          >
+            <SelectTrigger id={`${idPrefix}Status`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_JOGADOR.map((st) => (
+                <SelectItem key={st.valor} value={st.valor}>{st.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {erroDoFormulario(form) && <p className="text-sm text-destructive">{erroDoFormulario(form)}</p>}
     </div>
   );
 }
 
+// Tudo preenchido e válido: só então o botão de salvar fica habilitado.
 function formularioCompleto(form: PlayerForm): boolean {
-  return form.name.trim() !== '' && form.age !== '' && form.position !== '' && form.number !== '';
+  return form.name.trim() !== '' && form.birthDate !== '' && form.position !== '' && form.number !== ''
+    && form.tipo !== '' && erroDoFormulario(form) === null;
+}
+
+// O back responde 400 com a mensagem da regra que falhou (ex: menor de 18); mostra ela quando vier em texto.
+function mensagemDeErro(err: unknown, padrao: string): string {
+  if (!(err instanceof ApiError)) return "Não foi possível conectar ao servidor.";
+  return err.status === 400 && err.message && !err.message.startsWith('{') ? err.message : padrao;
 }
 
 export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
@@ -200,6 +335,12 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [newPlayer, setNewPlayer] = useState<PlayerForm>(emptyPlayerForm);
+
+  // Jogador aguardando confirmação de exclusão (null = pop-up fechado)
+  const [playerToDelete, setPlayerToDelete] = useState<Player | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
 
   useEffect(() => {
     carregarJogadores();
@@ -224,19 +365,22 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
   );
 
   async function handleAddPlayer() {
+    setAddError(null);
     try {
       const jogadorCriado = await api.post<JogadorApi>(`/peladas/${peladaId}/jogadores`, {
         name: newPlayer.name,
-        age: parseInt(newPlayer.age),
+        birthDate: newPlayer.birthDate,
         position: newPlayer.position,
         number: parseInt(newPlayer.number),
+        tipo: newPlayer.tipo,
+        status: newPlayer.status,
       });
 
       setPlayers([...players, jogadorApiParaPlayer(jogadorCriado)]);
       setIsAddDialogOpen(false);
       setNewPlayer(emptyPlayerForm);
-    } catch {
-      setError("Não foi possível adicionar o jogador.");
+    } catch (err) {
+      setAddError(mensagemDeErro(err, "Não foi possível adicionar o jogador."));
     }
   }
 
@@ -245,9 +389,12 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
     setEditError(null);
     setEditForm({
       name: player.name,
-      age: String(player.age),
+      // Jogador antigo sem data de nascimento: o campo vem vazio e precisa ser preenchido para salvar.
+      birthDate: player.birthDate ?? '',
       position: player.position,
       number: String(player.number),
+      tipo: player.tipo,
+      status: player.status,
     });
   }
 
@@ -257,29 +404,44 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
     setSavingEdit(true);
     setEditError(null);
     try {
-      // Só manda os dados cadastrais: papel, status e estatísticas são mantidos pelo back.
+      // Só manda os dados cadastrais e o status: papel e estatísticas são mantidos pelo back.
       const jogadorAtualizado = await api.put<JogadorApi>(`/peladas/${peladaId}/jogadores/${editingPlayer.id}`, {
         name: editForm.name,
-        age: parseInt(editForm.age),
+        birthDate: editForm.birthDate,
         position: editForm.position,
         number: parseInt(editForm.number),
+        tipo: editForm.tipo,
+        status: editForm.status,
       });
 
       setPlayers(players.map(p => p.id === editingPlayer.id ? jogadorApiParaPlayer(jogadorAtualizado) : p));
       setEditingPlayer(null);
     } catch (err) {
-      setEditError(err instanceof ApiError ? "Não foi possível salvar as alterações." : "Não foi possível conectar ao servidor.");
+      setEditError(mensagemDeErro(err, "Não foi possível salvar as alterações."));
     } finally {
       setSavingEdit(false);
     }
   }
 
-  async function handleDeletePlayer(id: number) {
+  function pedirConfirmacaoExclusao(player: Player) {
+    setDeleteError(null);
+    setPlayerToDelete(player);
+  }
+
+  // Só roda depois que o usuário confirma no pop-up.
+  async function handleDeletePlayer() {
+    if (!playerToDelete) return;
+
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      await api.delete(`/peladas/${peladaId}/jogadores/${id}`);
-      setPlayers(players.filter(p => p.id !== id));
-    } catch {
-      setError("Não foi possível remover o jogador.");
+      await api.delete(`/peladas/${peladaId}/jogadores/${playerToDelete.id}`);
+      setPlayers(players.filter(p => p.id !== playerToDelete.id));
+      setPlayerToDelete(null);
+    } catch (err) {
+      setDeleteError(mensagemDeErro(err, "Não foi possível remover o jogador."));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -454,11 +616,15 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
                 {/* Name and Position */}
                 <div className="text-center">
                   <h3 className="font-bold truncate">{player.name}</h3>
-                  <div className="flex items-center justify-center gap-2 mt-1">
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
                     <Badge variant="secondary" className={posicaoCorClasses(player.position)}>
                       {posicaoNome(player.position)}
                     </Badge>
                     <Badge variant="outline">{player.age} anos</Badge>
+                    <Badge variant="outline">{tipoNome(player.tipo)}</Badge>
+                    <Badge variant="secondary" className={statusInfo(player.status).classes}>
+                      {statusInfo(player.status).nome}
+                    </Badge>
                   </div>
                 </div>
 
@@ -532,7 +698,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
                     size="sm" 
                     variant="outline" 
                     className="text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDeletePlayer(player.id)}
+                    onClick={() => pedirConfirmacaoExclusao(player)}
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
@@ -557,6 +723,8 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
           </DialogHeader>
 
           <PlayerFields idPrefix="player" form={newPlayer} onChange={setNewPlayer} />
+
+          {addError && <p className="text-sm text-destructive">{addError}</p>}
 
           <DialogFooter>
             <Button
@@ -612,6 +780,36 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Player Confirmation */}
+      <AlertDialog
+        open={playerToDelete !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setPlayerToDelete(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir jogador?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir <strong>{playerToDelete?.name}</strong> desta pelada?
+              As estatísticas dele também serão apagadas. Essa ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              // Sem preventDefault o pop-up fecharia antes da resposta do back, escondendo um possível erro.
+              onClick={(e) => { e.preventDefault(); handleDeletePlayer(); }}
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

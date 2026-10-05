@@ -1,5 +1,7 @@
 using System;
 using System.Text;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -29,6 +31,31 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<FinanceiroService>();
+builder.Services.AddHttpClient<CpfVerificationService>(client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<CpfHasher>();
+
+// Limite de tentativas por IP. A contagem fica em memória: reiniciar o backend zera os contadores.
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy(RateLimitPolicies.Cadastro, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = RateLimitPolicies.CadastroLimite,
+                Window = RateLimitPolicies.CadastroJanela,
+                QueueLimit = 0,
+            }));
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
+        await context.HttpContext.Response.WriteAsync(
+            "Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.", cancellationToken);
+    };
+});
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(options =>
@@ -53,6 +80,7 @@ builder.Services.AddAuthentication(options =>
 var app = builder.Build();
 
 app.UseCors("AllowFrontend");
+app.UseRateLimiter();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

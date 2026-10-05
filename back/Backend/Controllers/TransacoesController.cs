@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Backend.Data;
 using Backend.DTOs;
 using Backend.Models;
+using Backend.Services;
 
 namespace Backend.Controllers
 {
@@ -73,13 +74,24 @@ namespace Backend.Controllers
             if (request.Type != "entrada" && request.Type != "saida")
                 return BadRequest("Tipo deve ser 'entrada' ou 'saida'.");
 
+            if (!CategoriasLancamento.Manuais.Contains(request.Category))
+                return BadRequest("Categoria inválida. Mensalidades, avulsos e multas são lançados pelas abas Mensalidades e A receber.");
+
+            if (request.Amount <= 0)
+                return BadRequest("O valor precisa ser maior que zero.");
+
+            var data = request.Date ?? FinanceiroService.HojeBrasil();
+            if (data > FinanceiroService.HojeBrasil())
+                return BadRequest("A data do lançamento não pode estar no futuro.");
+
             var transacao = new Transacao
             {
                 PeladaId = peladaId,
                 Type = request.Type,
                 Description = request.Description.Trim(),
                 Amount = request.Amount,
-                Date = DateTime.UtcNow,
+                // Meio-dia para a data não "voltar um dia" ao ser convertida de fuso no front.
+                Date = data.ToDateTime(new TimeOnly(12, 0)),
                 Category = request.Category,
                 PaidBy = request.PaidBy,
             };
@@ -107,6 +119,19 @@ namespace Backend.Controllers
             var transacao = await _db.Transacoes.SingleOrDefaultAsync(t => t.Id == id && t.PeladaId == peladaId);
             if (transacao is null)
                 return NotFound();
+
+            // Entrada gerada por um pagamento: apagar o lançamento desfaz o pagamento junto,
+            // senão o jogador apareceria como pago sem o dinheiro no caixa.
+            var mensalidade = await _db.MensalidadePagamentos.SingleOrDefaultAsync(m => m.TransacaoId == transacao.Id);
+            if (mensalidade is not null)
+                _db.MensalidadePagamentos.Remove(mensalidade);
+
+            var cobranca = await _db.Cobrancas.SingleOrDefaultAsync(c => c.TransacaoId == transacao.Id);
+            if (cobranca is not null)
+            {
+                cobranca.PagoEm = null;
+                cobranca.TransacaoId = null;
+            }
 
             _db.Transacoes.Remove(transacao);
             await _db.SaveChangesAsync();

@@ -1,6 +1,6 @@
 namespace Backend.DTOs
 {
-    public record RegisterRequest(string Name, string Email, string Password);
+    public record RegisterRequest(string Name, string Email, string Password, string Cpf, DateOnly BirthDate);
     public record LoginRequest(string Email, string Password);
     public record AuthResponse(string Token);
     public record UserResponse(int Id, string Name, string Email, DateTime CreatedAt);

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Backend.Data;
 using Backend.DTOs;
@@ -17,14 +18,21 @@ namespace Backend.Controllers
         private readonly AppDbContext _db;
         private readonly TokenService _tokenService;
         private readonly EmailService _emailService;
+        private readonly CpfVerificationService _cpfVerificationService;
+        private readonly CpfHasher _cpfHasher;
 
-        public AuthController(AppDbContext db, TokenService tokenService, EmailService emailService)
+        public AuthController(AppDbContext db, TokenService tokenService, EmailService emailService,
+            CpfVerificationService cpfVerificationService, CpfHasher cpfHasher)
         {
             _db = db;
             _tokenService = tokenService;
             _emailService = emailService;
+            _cpfVerificationService = cpfVerificationService;
+            _cpfHasher = cpfHasher;
         }
 
+        // Limitado por IP (política "cadastro" no Program.cs): cada tentativa pode virar uma consulta paga.
+        [EnableRateLimiting(RateLimitPolicies.Cadastro)]
         [HttpPost("register")]
         public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
         {
@@ -36,15 +44,47 @@ namespace Backend.Controllers
             if (await _db.Users.AnyAsync(u => u.Email == emailNormalized))
                 return Conflict("Já existe uma conta com esse e-mail.");
 
+            // Checagem local primeiro: CPF com dígito errado nem chega a gastar consulta no fornecedor.
+            var cpf = CpfValidator.Normalizar(request.Cpf);
+            if (!CpfValidator.EhValido(cpf))
+                return BadRequest("CPF inválido.");
+
+            // Também antes da API: CPF que já tem conta não precisa ser verificado de novo.
+            var cpfHash = _cpfHasher.Hash(cpf);
+            if (await _db.Users.AnyAsync(u => u.CpfHash == cpfHash))
+                return Conflict("Já existe uma conta com esse CPF.");
+
+            var resultado = await _cpfVerificationService.VerificarAsync(cpf, request.BirthDate);
+
+            if (resultado == ResultadoVerificacaoIdade.Indisponivel)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    "Não foi possível verificar seus dados agora. Tente novamente em alguns minutos.");
+
+            // Mensagem neutra: não diz se foi a idade, a data ou o CPF que não bateu.
+            if (resultado == ResultadoVerificacaoIdade.Reprovado)
+                return BadRequest("Não foi possível concluir o cadastro com os dados informados.");
+
+            // O CPF e a data de nascimento não são salvos: só o hash do CPF e o momento da verificação.
             var user = new User
             {
                 Name = request.Name.Trim(),
                 Email = emailNormalized,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+                AgeVerifiedAt = DateTime.UtcNow,
+                CpfHash = cpfHash,
             };
 
             _db.Users.Add(user);
-            await _db.SaveChangesAsync();
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Dois cadastros com o mesmo e-mail ou CPF ao mesmo tempo: os dois passaram pelas checagens
+                // acima, mas o índice único do banco deixa só um entrar.
+                return Conflict("Já existe uma conta com esse e-mail ou CPF.");
+            }
 
             return Ok(new AuthResponse(_tokenService.GenerateToken(user)));
         }
