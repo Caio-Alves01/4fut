@@ -15,10 +15,12 @@ namespace Backend.Controllers
     public class JogadoresController : ControllerBase
     {
         private readonly AppDbContext _db;
+        private readonly EstatisticasService _estatisticas;
 
-        public JogadoresController(AppDbContext db)
+        public JogadoresController(AppDbContext db, EstatisticasService estatisticas)
         {
             _db = db;
+            _estatisticas = estatisticas;
         }
 
         [HttpGet]
@@ -33,7 +35,8 @@ namespace Backend.Controllers
                 .Where(j => j.PeladaId == peladaId)
                 .ToListAsync();
 
-            var resposta = jogadores.Select(ParaResponse).ToList();
+            var estatisticas = await _estatisticas.CalcularAsync(peladaId, jogadores);
+            var resposta = jogadores.Select(j => ParaResponse(j, estatisticas[j.Id])).ToList();
             return Ok(resposta);
         }
 
@@ -73,7 +76,7 @@ namespace Backend.Controllers
             _db.Jogadores.Add(jogador);
             await _db.SaveChangesAsync();
 
-            return Ok(ParaResponse(jogador));
+            return Ok(await ParaResponseComEstatisticas(peladaId, jogador));
         }
 
         [HttpPut("{id}")]
@@ -110,7 +113,7 @@ namespace Backend.Controllers
 
             await _db.SaveChangesAsync();
 
-            return Ok(ParaResponse(jogador));
+            return Ok(await ParaResponseComEstatisticas(peladaId, jogador));
         }
 
         [HttpDelete("{id}")]
@@ -128,6 +131,7 @@ namespace Backend.Controllers
             // Sai das listas de presença e das cobranças em aberto. O que ele já pagou continua
             // registrado (o dinheiro entrou no caixa), aparecendo como "Jogador removido".
             _db.PartidaPresencas.RemoveRange(_db.PartidaPresencas.Where(p => p.JogadorId == id));
+            _db.PartidaEscalados.RemoveRange(_db.PartidaEscalados.Where(e => e.JogadorId == id));
             _db.Cobrancas.RemoveRange(_db.Cobrancas.Where(c => c.JogadorId == id && c.PagoEm == null));
             _db.Jogadores.Remove(jogador);
             await _db.SaveChangesAsync();
@@ -172,7 +176,14 @@ namespace Backend.Controllers
             return pelada is not null && pelada.OwnerUserId == userId;
         }
 
-        private static JogadorResponse ParaResponse(Jogador jogador)
+        private async Task<JogadorResponse> ParaResponseComEstatisticas(int peladaId, Jogador jogador)
+        {
+            var estatisticas = await _estatisticas.CalcularAsync(peladaId, new[] { jogador });
+            return ParaResponse(jogador, estatisticas[jogador.Id]);
+        }
+
+        // Gols, cartões e jogos vêm das partidas (ver EstatisticasService), não só dos campos do Jogador.
+        private static JogadorResponse ParaResponse(Jogador jogador, EstatisticasJogador estatisticas)
         {
             return new JogadorResponse(
                 jogador.Id,
@@ -185,11 +196,12 @@ namespace Backend.Controllers
                 jogador.Papel,
                 jogador.Tipo,
                 jogador.Status,
-                jogador.Gols,
-                jogador.Assistencias,
-                jogador.CartoesAmarelos,
-                jogador.CartoesVermelhos,
-                jogador.Jogos);
+                estatisticas.Gols,
+                estatisticas.Assistencias,
+                estatisticas.CartoesAmarelos,
+                estatisticas.CartoesVermelhos,
+                estatisticas.Jogos,
+                estatisticas.Nota);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,11 +17,13 @@ namespace Backend.Controllers
     {
         private readonly AppDbContext _db;
         private readonly FinanceiroService _financeiro;
+        private readonly EstatisticasService _estatisticas;
 
-        public PeladasController(AppDbContext db, FinanceiroService financeiro)
+        public PeladasController(AppDbContext db, FinanceiroService financeiro, EstatisticasService estatisticas)
         {
             _db = db;
             _financeiro = financeiro;
+            _estatisticas = estatisticas;
         }
 
         private int GetUserId()
@@ -50,24 +53,6 @@ namespace Backend.Controllers
                 return new List<string>();
 
             return daysOfWeek.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
-        }
-
-        // Nota do jogador, mesma fórmula do front (JogadoresPage.tsx: calculatePlayerRating).
-        private static double CalcularNotaJogador(Jogador jogador)
-        {
-            if (jogador.Jogos == 0)
-                return 0;
-
-            var nota = 5.0;
-
-            var golsBonus = Math.Min((jogador.Gols / (double)jogador.Jogos) * 3, 2.0);
-            nota += golsBonus;
-
-            var totalCartoes = jogador.CartoesAmarelos + (jogador.CartoesVermelhos * 2);
-            var cartoesPenalty = Math.Min((totalCartoes / (double)jogador.Jogos) * 1.5, 3.0);
-            nota -= cartoesPenalty;
-
-            return Math.Max(0, Math.Min(10, nota));
         }
 
         [HttpGet]
@@ -155,33 +140,29 @@ namespace Backend.Controllers
                 : new NextMatchInfo(proximaPartida.Date, proximaPartida.Time, proximaPartida.Location);
 
             var jogadores = await _db.Jogadores.Where(j => j.PeladaId == id).ToListAsync();
+            var estatisticas = await _estatisticas.CalcularAsync(id, jogadores);
+            var comNumeros = jogadores.Select(j => (Jogador: j, Stats: estatisticas[j.Id])).ToList();
 
-            ArtilheiroInfo? artilheiro = null;
-            var jogadoresComJogos = jogadores.Where(j => j.Jogos > 0).ToList();
-            if (jogadoresComJogos.Count > 0)
-            {
-                var melhorArtilheiro = jogadoresComJogos.OrderByDescending(j => j.Gols).First();
-                if (melhorArtilheiro.Gols > 0)
-                    artilheiro = new ArtilheiroInfo(melhorArtilheiro.Name, melhorArtilheiro.Gols);
-            }
+            // Em caso de empate, fica quem tem menos jogos (melhor aproveitamento) e depois o nome.
+            ArtilheiroInfo? artilheiro = comNumeros
+                .Where(x => x.Stats.Gols > 0)
+                .OrderByDescending(x => x.Stats.Gols).ThenBy(x => x.Stats.Jogos).ThenBy(x => x.Jogador.Name)
+                .Select(x => new ArtilheiroInfo(x.Jogador.Name, x.Stats.Gols))
+                .FirstOrDefault();
 
-            MelhorJogadorInfo? melhorJogador = null;
-            if (jogadoresComJogos.Count > 0)
-            {
-                var melhor = jogadoresComJogos.OrderByDescending(CalcularNotaJogador).First();
-                melhorJogador = new MelhorJogadorInfo(melhor.Name, Math.Round(CalcularNotaJogador(melhor), 1));
-            }
+            MelhorJogadorInfo? melhorJogador = comNumeros
+                .Where(x => x.Stats.Jogos > 0)
+                .OrderByDescending(x => x.Stats.Nota).ThenByDescending(x => x.Stats.Jogos).ThenBy(x => x.Jogador.Name)
+                .Select(x => new MelhorJogadorInfo(x.Jogador.Name, x.Stats.Nota))
+                .FirstOrDefault();
 
-            MaisIndisciplinadoInfo? maisIndisciplinado = null;
-            if (jogadores.Count > 0)
-            {
-                var maisCartoes = jogadores
-                    .OrderByDescending(j => j.CartoesAmarelos + j.CartoesVermelhos)
-                    .First();
-                var total = maisCartoes.CartoesAmarelos + maisCartoes.CartoesVermelhos;
-                if (total > 0)
-                    maisIndisciplinado = new MaisIndisciplinadoInfo(maisCartoes.Name, maisCartoes.CartoesAmarelos, maisCartoes.CartoesVermelhos, total);
-            }
+            MaisIndisciplinadoInfo? maisIndisciplinado = comNumeros
+                .Where(x => x.Stats.TotalCartoes > 0)
+                .OrderByDescending(x => x.Stats.TotalCartoes).ThenBy(x => x.Jogador.Name)
+                .Select(x => new MaisIndisciplinadoInfo(x.Jogador.Name, x.Stats.CartoesAmarelos, x.Stats.CartoesVermelhos, x.Stats.TotalCartoes))
+                .FirstOrDefault();
+
+            var atividades = await AtividadesRecentes(id, jogadores);
 
             // Jogadores com alguma coisa a receber (mensalidade em aberto, avulso ou cartão não pago).
             var aReceber = await _financeiro.CalcularAReceberAsync(pelada);
@@ -202,8 +183,62 @@ namespace Backend.Controllers
                 totalMatches,
                 balance,
                 nextMatch,
-                destaques
+                destaques,
+                atividades
             ));
+        }
+
+        private const int MaxAtividades = 8;
+        private static readonly CultureInfo PtBr = new("pt-BR");
+
+        // Últimos acontecimentos da pelada: partidas agendadas e finalizadas, jogadores novos e movimentações do caixa.
+        private async Task<List<AtividadeInfo>> AtividadesRecentes(int peladaId, List<Jogador> jogadores)
+        {
+            var atividades = new List<AtividadeInfo>();
+
+            var agendadas = await _db.Partidas
+                .Where(p => p.PeladaId == peladaId)
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(MaxAtividades)
+                .ToListAsync();
+            foreach (var p in agendadas)
+            {
+                var quando = p.Date.ToString("dddd, dd/MM", PtBr);
+                atividades.Add(new AtividadeInfo("agendada", "Partida agendada", $"{quando} às {p.Time} · {p.Location}", p.CreatedAt));
+            }
+
+            var partidas = await _db.Partidas
+                .Where(p => p.PeladaId == peladaId && p.Status == "finalizada")
+                .OrderByDescending(p => p.Date)
+                .Take(MaxAtividades)
+                .ToListAsync();
+            foreach (var p in partidas)
+            {
+                var data = TimeOnly.TryParse(p.Time, out var hora) ? p.Date.Date.Add(hora.ToTimeSpan()) : p.Date;
+                atividades.Add(new AtividadeInfo("partida", "Partida realizada",
+                    $"Time 1 {p.ScoreTeam1 ?? 0} x {p.ScoreTeam2 ?? 0} Time 2 · {p.Location}", data));
+            }
+
+            foreach (var j in jogadores.OrderByDescending(j => j.CreatedAt).Take(MaxAtividades))
+                atividades.Add(new AtividadeInfo("jogador", "Novo jogador adicionado", $"{j.Name} entrou na pelada", j.CreatedAt));
+
+            var transacoes = await _db.Transacoes
+                .Where(t => t.PeladaId == peladaId)
+                .OrderByDescending(t => t.Date).ThenByDescending(t => t.Id)
+                .Take(MaxAtividades)
+                .ToListAsync();
+            foreach (var t in transacoes)
+            {
+                var valor = t.Amount.ToString("C", PtBr);
+                if (t.Type == "saida")
+                    atividades.Add(new AtividadeInfo("despesa", "Despesa registrada", $"{valor} · {t.Description}", t.Date));
+                else if (!string.IsNullOrWhiteSpace(t.PaidBy))
+                    atividades.Add(new AtividadeInfo("pagamento", "Pagamento recebido", $"{valor} de {t.PaidBy} · {t.Description}", t.Date));
+                else
+                    atividades.Add(new AtividadeInfo("pagamento", "Entrada no caixa", $"{valor} · {t.Description}", t.Date));
+            }
+
+            return atividades.OrderByDescending(a => a.Data).Take(MaxAtividades).ToList();
         }
 
         [HttpPut("{id}")]

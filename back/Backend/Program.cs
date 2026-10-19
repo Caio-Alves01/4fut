@@ -32,6 +32,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<FinanceiroService>();
+builder.Services.AddScoped<EstatisticasService>();
 builder.Services.AddHttpClient<CpfVerificationService>(client => client.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<CpfHasher>();
 

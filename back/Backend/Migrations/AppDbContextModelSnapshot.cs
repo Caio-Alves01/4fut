@@ -188,8 +188,27 @@ namespace Backend.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
                     b.Property<DateTime>("Date")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<string>("EsquemaTime1")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("4-4-2");
+
+                    b.Property<string>("EsquemaTime2")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("4-4-2");
 
                     b.Property<string>("Location")
                         .IsRequired()
@@ -219,6 +238,37 @@ namespace Backend.Migrations
                     b.ToTable("Partidas");
                 });
 
+            modelBuilder.Entity("Backend.Models.PartidaEscalado", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("JogadorId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PartidaId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Posicao")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Time")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartidaId", "JogadorId")
+                        .IsUnique();
+
+                    b.HasIndex("PartidaId", "Time", "Posicao")
+                        .IsUnique();
+
+                    b.ToTable("PartidaEscalados");
+                });
+
             modelBuilder.Entity("Backend.Models.PartidaEvento", b =>
                 {
                     b.Property<int>("Id")
@@ -230,10 +280,13 @@ namespace Backend.Migrations
                     b.Property<int?>("AssistJogadorId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("EntraJogadorId")
+                        .HasColumnType("int");
+
                     b.Property<int>("JogadorId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Minuto")
+                    b.Property<int?>("Minuto")
                         .HasColumnType("int");
 
                     b.Property<int>("PartidaId")

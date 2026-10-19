@@ -8,8 +8,13 @@ namespace Backend.DTOs
     public record PresencaResponse(int JogadorId, string Nome, string TipoJogador, string Confirmacao, bool Presente);
     public record UpdatePresencaRequest(string Confirmacao, bool Presente);
 
-    public record EventoResponse(int Id, string Tipo, int JogadorId, string JogadorNome, int? AssistJogadorId, string? AssistJogadorNome, int Minuto, int Time);
-    public record CreateEventoRequest(string Tipo, int JogadorId, int? AssistJogadorId, int Minuto, int Time);
+    // Substituição: JogadorId/JogadorNome = quem saiu, EntraJogadorId/EntraJogadorNome = quem entrou.
+    public record EventoResponse(int Id, string Tipo, int JogadorId, string JogadorNome, int? AssistJogadorId, string? AssistJogadorNome, int? Minuto, int Time, int? EntraJogadorId, string? EntraJogadorNome);
+    public record CreateEventoRequest(string Tipo, int JogadorId, int? AssistJogadorId, int Time, int? Minuto = null, int? EntraJogadorId = null);
 
-    public record PartidaDetalhesResponse(PartidaResponse Partida, List<PresencaResponse> Presencas, List<EventoResponse> Eventos);
+    // Escalação de um time: Jogadores tem sempre 11 itens, um por posição do esquema (null = posição vazia).
+    public record EscalacaoTimeDto(int Time, string Esquema, List<int?> Jogadores);
+    public record UpdateEscalacaoRequest(List<EscalacaoTimeDto> Times);
+
+    public record PartidaDetalhesResponse(PartidaResponse Partida, List<PresencaResponse> Presencas, List<EventoResponse> Eventos, List<EscalacaoTimeDto> Escalacao);
 }

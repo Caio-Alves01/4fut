@@ -57,6 +57,10 @@ namespace Backend.DTOs
         int TotalMatches,
         decimal Balance,
         NextMatchInfo? NextMatch,
-        DestaquesInfo Destaques
+        DestaquesInfo Destaques,
+        List<AtividadeInfo> Atividades
     );
+
+    // Item de "Atividades Recentes". Tipo: agendada | partida | jogador | pagamento | despesa (define o ícone no front).
+    public record AtividadeInfo(string Tipo, string Titulo, string Descricao, DateTime Data);
 }

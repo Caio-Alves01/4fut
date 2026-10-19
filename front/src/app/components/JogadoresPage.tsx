@@ -96,6 +96,8 @@ interface Player {
     cartoesAmarelos: number;
     cartoesVermelhos: number;
     jogos: number;
+    /** Nota de 0 a 10 calculada no back (Services/EstatisticasService.cs); 0 = ainda sem jogos */
+    nota: number;
   };
 }
 
@@ -119,6 +121,7 @@ interface JogadorApi {
   cartoesAmarelos: number;
   cartoesVermelhos: number;
   jogos: number;
+  nota: number;
 }
 
 function jogadorApiParaPlayer(jogador: JogadorApi): Player {
@@ -138,28 +141,15 @@ function jogadorApiParaPlayer(jogador: JogadorApi): Player {
       cartoesAmarelos: jogador.cartoesAmarelos,
       cartoesVermelhos: jogador.cartoesVermelhos,
       jogos: jogador.jogos,
+      nota: jogador.nota,
     },
   };
 }
 
-// Função para calcular média do jogador
+// Gols, assistências, cartões e jogos vêm das partidas (lances registrados e presença);
+// a nota usa a mesma conta dos Destaques da pelada, feita no back.
 function calculatePlayerRating(player: Player): number {
-  if (player.stats.jogos === 0) return 0;
-
-  // Base: 5.0
-  let rating = 5.0;
-
-  // Gols aumentam a média (+0.3 por gol, máximo de +2.0)
-  const golsBonus = Math.min((player.stats.gols / player.stats.jogos) * 3, 2.0);
-  rating += golsBonus;
-
-  // Cartões diminuem a média
-  const totalCartoes = player.stats.cartoesAmarelos + (player.stats.cartoesVermelhos * 2);
-  const cartoesPenalty = Math.min((totalCartoes / player.stats.jogos) * 1.5, 3.0);
-  rating -= cartoesPenalty;
-
-  // Garantir que a nota fique entre 0 e 10
-  return Math.max(0, Math.min(10, rating));
+  return player.stats.nota;
 }
 
 interface PlayerForm {
@@ -463,22 +453,22 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
 
   // Função auxiliar: soma total de cartões de um jogador (usada só pra ordenar)
   function totalCartoes(player: Player) {
-    return player.stats.cartoesAmarelos + player.stats.cartoesVermelhos * 2;
+    return player.stats.cartoesAmarelos + player.stats.cartoesVermelhos;
   }
 
-  // Stats para o topo: pega o primeiro jogador de cada lista já ordenada
-  const jogadoresPorGols = [...players].sort((a, b) => b.stats.gols - a.stats.gols);
-  const topScorer = jogadoresPorGols[0];
+  // Stats para o topo: só entra quem já tem o número (sem gol não há artilheiro, sem jogo não há
+  // média, sem cartão não há "mais cartões"). Empate: menos jogos / mais jogos / nome.
+  const topScorer = players
+    .filter((p) => p.stats.gols > 0)
+    .sort((a, b) => b.stats.gols - a.stats.gols || a.stats.jogos - b.stats.jogos || a.name.localeCompare(b.name))[0];
 
-  const jogadoresPorMedia = [...players].sort(
-    (a, b) => calculatePlayerRating(b) - calculatePlayerRating(a)
-  );
-  const bestRating = jogadoresPorMedia[0];
+  const bestRating = players
+    .filter((p) => p.stats.jogos > 0)
+    .sort((a, b) => calculatePlayerRating(b) - calculatePlayerRating(a) || b.stats.jogos - a.stats.jogos || a.name.localeCompare(b.name))[0];
 
-  const jogadoresPorCartoes = [...players].sort(
-    (a, b) => totalCartoes(b) - totalCartoes(a)
-  );
-  const mostCards = jogadoresPorCartoes[0];
+  const mostCards = players
+    .filter((p) => totalCartoes(p) > 0)
+    .sort((a, b) => totalCartoes(b) - totalCartoes(a) || a.name.localeCompare(b.name))[0];
 
   if (loading) {
     return <p className="text-muted-foreground">Carregando jogadores...</p>;
@@ -527,11 +517,11 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
           <CardContent className="p-4">
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Artilheiro</p>
-              <p className="text-xl font-bold">
-                {topScorer ? topScorer.name.split(' ')[0] : '—'}
+              <p className="text-xl font-bold truncate">
+                {topScorer ? topScorer.name : '—'}
               </p>
               <p className="text-sm text-green-600">
-                {topScorer ? `${topScorer.stats.gols} gols` : 'Sem jogadores ainda'}
+                {topScorer ? `${topScorer.stats.gols} ${topScorer.stats.gols === 1 ? 'gol' : 'gols'}` : 'Nenhum gol registrado'}
               </p>
             </div>
           </CardContent>
@@ -541,11 +531,11 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
           <CardContent className="p-4">
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Melhor Média</p>
-              <p className="text-xl font-bold">
-                {bestRating ? bestRating.name.split(' ')[0] : '—'}
+              <p className="text-xl font-bold truncate">
+                {bestRating ? bestRating.name : '—'}
               </p>
               <p className="text-sm text-blue-600">
-                {bestRating ? `⭐ ${calculatePlayerRating(bestRating).toFixed(1)}` : 'Sem jogadores ainda'}
+                {bestRating ? `⭐ ${calculatePlayerRating(bestRating).toFixed(1)}` : 'Nenhuma partida finalizada'}
               </p>
             </div>
           </CardContent>
@@ -555,11 +545,11 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
           <CardContent className="p-4">
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Mais Cartões</p>
-              <p className="text-xl font-bold">
-                {mostCards ? mostCards.name.split(' ')[0] : '—'}
+              <p className="text-xl font-bold truncate">
+                {mostCards ? mostCards.name : '—'}
               </p>
               <p className="text-sm text-orange-600">
-                {mostCards ? `${mostCards.stats.cartoesAmarelos + mostCards.stats.cartoesVermelhos} cartões` : 'Sem jogadores ainda'}
+                {mostCards ? `${mostCards.stats.cartoesAmarelos} 🟨 · ${mostCards.stats.cartoesVermelhos} 🟥` : 'Nenhum cartão registrado'}
               </p>
             </div>
           </CardContent>
@@ -602,11 +592,11 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
                   </div>
                 </div>
 
-                {/* Rating Badge */}
+                {/* Desempenho (nota de 0 a 10 calculada pelas partidas) */}
                 <div className="absolute top-2 left-2">
-                  <div className="bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow-lg">
+                  <div className="bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow-lg" title="Nota de desempenho (gols, assistências e cartões por jogo)">
                     <span className={`text-sm font-bold ${getRatingColor(rating)}`}>
-                      ⭐ {rating.toFixed(1)}
+                      ⭐ {player.stats.jogos > 0 ? rating.toFixed(1) : '—'}
                     </span>
                   </div>
                 </div>

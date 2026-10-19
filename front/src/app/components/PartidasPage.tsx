@@ -6,7 +6,6 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Switch } from './ui/switch';
 import {
   ArrowLeft,
   Plus,
@@ -23,10 +22,11 @@ import {
   AlertTriangle,
   AlertCircle,
   CheckCircle2,
-  HelpCircle,
   XCircle,
+  Search,
   ClipboardList,
   Trash2,
+  ArrowLeftRight,
   Flag
 } from 'lucide-react';
 import {
@@ -56,20 +56,25 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { EscalacaoCartolaPage } from './EscalacaoCartolaPage';
+import { EscalacaoCartolaPage, EscalacaoJogador, EscalacaoTime, TipoEvento } from './EscalacaoCartolaPage';
 import { api, ApiError } from '../lib/api';
 
 // Formatos devolvidos por GET /partidas/{id}/detalhes (presença e eventos ficam salvos no back).
 interface GameEvent {
   id: number;
-  tipo: 'gol' | 'amarelo' | 'vermelho';
+  tipo: 'gol' | 'amarelo' | 'vermelho' | 'substituicao';
+  /** Na substituição, quem saiu */
   jogadorId: number;
   jogadorNome: string;
   /** Jogador que deu a assistência (apenas para eventos do tipo 'gol') */
   assistJogadorId: number | null;
   assistJogadorNome: string | null;
-  minuto: number;
+  /** Só nos lances antigos; hoje o lance é registrado sem minutagem. */
+  minuto: number | null;
   time: 1 | 2;
+  /** Só na substituição: quem entrou */
+  entraJogadorId: number | null;
+  entraJogadorNome: string | null;
 }
 
 interface Presenca {
@@ -97,6 +102,7 @@ interface PartidaDetalhes {
   partida: Match;
   presencas: Presenca[];
   eventos: GameEvent[];
+  escalacao: EscalacaoTime[];
 }
 
 interface PartidasPageProps {
@@ -104,27 +110,27 @@ interface PartidasPageProps {
   onNavigate: (page: string, peladaId?: number) => void;
 }
 
-// Badge visual pro status de confirmação de presença de um jogador.
-function confirmacaoBadge(status: Presenca['confirmacao']) {
-  if (status === 'confirmado') {
-    return (
-      <Badge className="bg-green-100 text-green-800 hover:bg-green-100 flex items-center gap-1 w-fit">
-        <CheckCircle2 className="h-3 w-3" /> Confirmado
-      </Badge>
-    );
+interface JogadorDaPelada extends EscalacaoJogador {
+  status: string;
+}
+
+// Situação do jogador na lista de presença. Antes de finalizar vale a confirmação;
+// depois, vale quem compareceu de fato (campo `presente`, que gera cobrança do avulso).
+type SituacaoPresenca = 'presente' | 'faltante' | 'pendente';
+
+function situacaoPresenca(p: Presenca, partidaFinalizada: boolean): SituacaoPresenca {
+  if (partidaFinalizada) {
+    if (p.presente) return 'presente';
+    return p.confirmacao === 'recusado' ? 'faltante' : 'pendente';
   }
-  if (status === 'recusado') {
-    return (
-      <Badge variant="destructive" className="flex items-center gap-1 w-fit">
-        <XCircle className="h-3 w-3" /> Recusado
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="secondary" className="flex items-center gap-1 w-fit">
-      <HelpCircle className="h-3 w-3" /> Pendente
-    </Badge>
-  );
+  if (p.confirmacao === 'confirmado') return 'presente';
+  if (p.confirmacao === 'recusado') return 'faltante';
+  return 'pendente';
+}
+
+// Busca sem diferenciar maiúsculas nem acentos ("joao" encontra "João").
+function normalizarBusca(texto: string): string {
+  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 }
 
 interface MatchForm {
@@ -222,7 +228,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const [editError, setEditError] = useState<string | null>(null);
 
   const [matches, setMatches] = useState<Match[]>([]);
-  const [jogadoresAtivos, setJogadoresAtivos] = useState(0);
+  const [jogadores, setJogadores] = useState<JogadorDaPelada[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -234,10 +240,10 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
       try {
         const [data, jogadores] = await Promise.all([
           api.get<Match[]>(`/peladas/${peladaId}/partidas`),
-          api.get<{ status: string }[]>(`/peladas/${peladaId}/jogadores`),
+          api.get<JogadorDaPelada[]>(`/peladas/${peladaId}/jogadores`),
         ]);
         setMatches(data);
-        setJogadoresAtivos(jogadores.filter(j => j.status === 'ativo').length);
+        setJogadores(jogadores);
       } catch (err) {
         setError(err instanceof ApiError ? 'Não foi possível carregar as partidas.' : 'Não foi possível conectar ao servidor.');
       } finally {
@@ -254,6 +260,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const [detalhesError, setDetalhesError] = useState<string | null>(null);
   const [confirmarFinalizacao, setConfirmarFinalizacao] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
+  const [buscaPresenca, setBuscaPresenca] = useState('');
 
 
   // Erros de data no passado. Na edição só vale se o usuário mudou data ou horário
@@ -262,6 +269,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const mudouDataHora = editingMatch !== null &&
     (editForm.date !== editingMatch.date.slice(0, 10) || editForm.time !== editingMatch.time);
   const erroEdicao = mudouDataHora ? erroDoFormulario(editForm) : null;
+
+  const jogadoresAtivos = jogadores.filter(j => j.status === 'ativo').length;
 
   const upcomingMatches = matches.filter(m => m.status === 'agendada');
   const pastMatches = matches.filter(m => m.status === 'finalizada');
@@ -324,13 +333,6 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     }
   }
 
-  // Troca o status de confirmação seguindo sempre a mesma ordem.
-  function nextConfirmacao(status: Presenca['confirmacao']): Presenca['confirmacao'] {
-    if (status === 'pendente') return 'confirmado';
-    if (status === 'confirmado') return 'recusado';
-    return 'pendente';
-  }
-
   // Mensagem do back (400 com texto) ou uma genérica.
   function mensagemDeErro(err: unknown, padrao: string): string {
     if (!(err instanceof ApiError)) return 'Não foi possível conectar ao servidor.';
@@ -357,6 +359,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   function abrirPartida(match: Match) {
     setSelectedMatch(match);
     setDetalhes(null);
+    setBuscaPresenca('');
     setShowEscalacao(true);
     carregarDetalhes(match.id);
   }
@@ -372,21 +375,25 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
         `/peladas/${peladaId}/partidas/${selectedMatch.id}/presencas/${presenca.jogadorId}`,
         { confirmacao: nova.confirmacao, presente: nova.presente },
       );
-      setDetalhes({
-        ...detalhes,
-        presencas: detalhes.presencas.map((p) => (p.jogadorId === salva.jogadorId ? salva : p)),
+      // Atualiza a partir do estado mais recente: com vários cliques seguidos, cada resposta
+      // só troca o próprio jogador (sem desfazer as marcações que chegaram antes).
+      setDetalhes((atuais) => atuais && {
+        ...atuais,
+        presencas: atuais.presencas.map((p) => (p.jogadorId === salva.jogadorId ? salva : p)),
       });
     } catch (err) {
       setDetalhesError(mensagemDeErro(err, 'Não foi possível salvar a presença.'));
     }
   }
 
-  function handleToggleConfirmacao(presenca: Presenca) {
-    salvarPresenca(presenca, { confirmacao: nextConfirmacao(presenca.confirmacao) });
-  }
-
-  function handleTogglePresente(presenca: Presenca) {
-    salvarPresenca(presenca, { presente: !presenca.presente });
+  // Botões verde (presente) e vermelho (faltante). Com a partida finalizada também marca
+  // se compareceu de fato; antes disso só registra a confirmação.
+  function handleMarcarPresenca(presenca: Presenca, presente: boolean) {
+    const partidaFinalizada = selectedMatch?.status === 'finalizada';
+    salvarPresenca(presenca, {
+      confirmacao: presente ? 'confirmado' : 'recusado',
+      presente: partidaFinalizada && presente,
+    });
   }
 
   // Ids guardados como string porque é o que o <Select> trabalha.
@@ -395,27 +402,66 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     jogadorId: '',
     assistJogadorId: '',
     time: '1' as '1' | '2',
-    minuto: ''
   });
 
   // Registra o evento no back; cartão gera multa no financeiro e gol atualiza o placar.
-  async function handleAddEvent() {
-    if (!selectedMatch) return;
-    if (!newEvent.jogadorId || !newEvent.minuto) return;
+  // Usado pelo formulário da aba Eventos e pelos botões rápidos da escalação.
+  async function registrarEvento(evento: {
+    tipo: TipoEvento;
+    jogadorId: number;
+    assistJogadorId?: number | null;
+    entraJogadorId?: number | null;
+    time: 1 | 2;
+  }): Promise<boolean> {
+    if (!selectedMatch) return false;
 
     setDetalhesError(null);
     try {
       await api.post(`/peladas/${peladaId}/partidas/${selectedMatch.id}/eventos`, {
-        tipo: newEvent.tipo,
-        jogadorId: Number(newEvent.jogadorId),
-        assistJogadorId: newEvent.tipo === 'gol' && newEvent.assistJogadorId ? Number(newEvent.assistJogadorId) : null,
-        minuto: parseInt(newEvent.minuto),
-        time: Number(newEvent.time),
+        tipo: evento.tipo,
+        jogadorId: evento.jogadorId,
+        assistJogadorId: evento.tipo === 'gol' ? evento.assistJogadorId ?? null : null,
+        entraJogadorId: evento.tipo === 'substituicao' ? evento.entraJogadorId ?? null : null,
+        time: evento.time,
       });
-      setNewEvent({ tipo: 'gol', jogadorId: '', assistJogadorId: '', time: '1', minuto: '' });
       await carregarDetalhes(selectedMatch.id);
+      return true;
     } catch (err) {
       setDetalhesError(mensagemDeErro(err, 'Não foi possível registrar o evento.'));
+      return false;
+    }
+  }
+
+  async function handleAddEvent() {
+    if (!newEvent.jogadorId) return;
+
+    const ok = await registrarEvento({
+      tipo: newEvent.tipo,
+      jogadorId: Number(newEvent.jogadorId),
+      assistJogadorId: newEvent.assistJogadorId ? Number(newEvent.assistJogadorId) : null,
+      time: Number(newEvent.time) as 1 | 2,
+    });
+    if (ok) {
+      setNewEvent({ tipo: 'gol', jogadorId: '', assistJogadorId: '', time: '1' });
+    }
+  }
+
+  // Salva a escalação dos dois times (chamado automaticamente pela tela de escalação).
+  async function salvarEscalacao(escalacao: EscalacaoTime[]): Promise<boolean> {
+    if (!selectedMatch) return false;
+
+    // Atualiza já na tela: se a aba for reaberta antes da resposta, começa com a versão nova.
+    setDetalhes((atuais) => (atuais ? { ...atuais, escalacao } : atuais));
+    try {
+      const salva = await api.put<EscalacaoTime[]>(
+        `/peladas/${peladaId}/partidas/${selectedMatch.id}/escalacao`,
+        { times: escalacao },
+      );
+      setDetalhes((atuais) => (atuais ? { ...atuais, escalacao: salva } : atuais));
+      return true;
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível salvar a escalação.'));
+      return false;
     }
   }
 
@@ -475,6 +521,35 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   if (showEscalacao && selectedMatch) {
     const presencas = detalhes?.presencas ?? [];
     const eventos = detalhes?.eventos ?? [];
+    const partidaFinalizada = selectedMatch.status === 'finalizada';
+
+    const situacoes = new Map(presencas.map((p) => [p.jogadorId, situacaoPresenca(p, partidaFinalizada)]));
+    const totalPresentes = presencas.filter((p) => situacoes.get(p.jogadorId) === 'presente').length;
+    const totalFaltantes = presencas.filter((p) => situacoes.get(p.jogadorId) === 'faltante').length;
+
+    const termoBusca = normalizarBusca(buscaPresenca);
+    const presencasFiltradas = termoBusca
+      ? presencas.filter((p) => normalizarBusca(p.nome).includes(termoBusca))
+      : presencas;
+
+    // Quem pode ser escalado: os presentes. Depois de finalizar, a aba Presença passa a marcar quem
+    // compareceu e, até isso ser feito, ninguém está marcado; por isso também valem quem confirmou,
+    // quem já está na escalação e quem tem lance. Só fica de fora quem foi marcado como faltante.
+    const jogadorPorId = new Map(jogadores.map((j) => [j.id, j]));
+    const naEscalacaoOuComLance = new Set<number>([
+      ...(detalhes?.escalacao ?? []).flatMap((t) => t.jogadores).filter((id): id is number => id !== null),
+      ...eventos.flatMap((e) => [e.jogadorId, e.assistJogadorId, e.entraJogadorId]).filter((id): id is number => id !== null),
+    ]);
+    const jogadoresEscalaveis: EscalacaoJogador[] = [];
+    for (const p of presencas) {
+      const jogador = jogadorPorId.get(p.jogadorId);
+      const situacao = situacoes.get(p.jogadorId);
+      const podeJogar = situacao === 'presente'
+        || (partidaFinalizada && situacao !== 'faltante' && (p.confirmacao === 'confirmado' || naEscalacaoOuComLance.has(p.jogadorId)));
+      if (jogador && podeJogar) {
+        jogadoresEscalaveis.push(jogador);
+      }
+    }
 
     return (
       <div className="space-y-6">
@@ -518,8 +593,8 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
             <AlertDialogHeader>
               <AlertDialogTitle>Finalizar partida?</AlertDialogTitle>
               <AlertDialogDescription>
-                Depois de finalizar, marque na aba Presença quem compareceu. Avulsos marcados como presentes
-                geram cobrança automaticamente no financeiro.
+                Quem confirmou presença, está na escalação ou teve lance já fica marcado como presente. Depois,
+                ajuste na aba Presença se alguém faltou. Avulsos presentes geram cobrança automaticamente no financeiro.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -583,7 +658,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
             <div className="mt-6 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
               <p className="text-sm text-blue-800 flex items-center gap-2">
                 <AlertCircle className="h-5 w-5" />
-                <strong>Dica:</strong> Use os botões rápidos "⚽ Gol" e "🟨/🟥 Cartão" ao lado de cada jogador escalado para registrar eventos durante a partida.
+                <strong>Dica:</strong> Na aba Escalação, use os botões de gol, assistência e cartões embaixo de cada jogador escalado para registrar os lances da partida.
               </p>
             </div>
           </CardContent>
@@ -610,50 +685,83 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
           <TabsContent value="presenca" className="mt-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Confirmação de Presença</span>
-                  <Badge variant="outline">
-                    {presencas.filter(p => p.confirmacao === 'confirmado').length}/{presencas.length} confirmados
-                  </Badge>
+                <CardTitle className="flex items-center justify-between gap-2 flex-wrap">
+                  <span>{partidaFinalizada ? 'Presença na Partida' : 'Confirmação de Presença'}</span>
+                  <div className="flex gap-2">
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                      {totalPresentes} presentes
+                    </Badge>
+                    <Badge className="bg-red-100 text-red-800 hover:bg-red-100">
+                      {totalFaltantes} faltantes
+                    </Badge>
+                    <Badge variant="outline">
+                      {presencas.length - totalPresentes - totalFaltantes} pendentes
+                    </Badge>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar jogador..."
+                    className="pl-9"
+                    value={buscaPresenca}
+                    onChange={(e) => setBuscaPresenca(e.target.value)}
+                  />
+                </div>
                 <div className="space-y-2">
                   {detalhes && presencas.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-6">
                       Nenhum jogador ativo nesta pelada. Cadastre jogadores na aba Jogadores.
                     </p>
                   )}
-                  {presencas.map((p) => (
-                    <div key={p.jogadorId} className="flex items-center justify-between p-3 border rounded-lg gap-4 flex-wrap">
-                      <span className="font-medium flex items-center gap-2">
-                        {p.nome}
-                        {p.tipoJogador === 'avulso' && <Badge variant="outline">Avulso</Badge>}
-                      </span>
-                      <div className="flex items-center gap-4">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleConfirmacao(p)}
-                          className="cursor-pointer"
-                          title="Clique para alternar a confirmação"
-                        >
-                          {confirmacaoBadge(p.confirmacao)}
-                        </button>
+                  {presencas.length > 0 && presencasFiltradas.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-6">
+                      Nenhum jogador encontrado para "{buscaPresenca}".
+                    </p>
+                  )}
+                  {presencasFiltradas.map((p) => {
+                    const situacao = situacoes.get(p.jogadorId);
+                    return (
+                      <div key={p.jogadorId} className="flex items-center justify-between p-3 border rounded-lg gap-4 flex-wrap">
+                        <span className="font-medium flex items-center gap-2">
+                          {p.nome}
+                          {p.tipoJogador === 'avulso' && <Badge variant="outline">Avulso</Badge>}
+                        </span>
                         <div className="flex items-center gap-2">
-                          <Switch
-                            checked={p.presente}
-                            disabled={selectedMatch.status !== 'finalizada'}
-                            onCheckedChange={() => handleTogglePresente(p)}
-                          />
-                          <Label className="text-sm text-muted-foreground">Presente</Label>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-pressed={situacao === 'presente'}
+                            className={situacao === 'presente'
+                              ? 'bg-green-600 hover:bg-green-700 text-white border-green-600 hover:text-white'
+                              : 'border-green-600 text-green-700 hover:bg-green-50'}
+                            onClick={() => handleMarcarPresenca(p, true)}
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-1" />
+                            Presente
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-pressed={situacao === 'faltante'}
+                            className={situacao === 'faltante'
+                              ? 'bg-red-600 hover:bg-red-700 text-white border-red-600 hover:text-white'
+                              : 'border-red-600 text-red-700 hover:bg-red-50'}
+                            onClick={() => handleMarcarPresenca(p, false)}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Faltante
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
-                {selectedMatch.status !== 'finalizada' ? (
+                {!partidaFinalizada ? (
                   <p className="text-xs text-muted-foreground mt-3">
-                    A confirmação de presença real (compareceu) só fica disponível após a partida ser finalizada.
+                    Antes da partida, os botões registram a confirmação. Depois de finalizar, marcam quem compareceu de fato.
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground mt-3">
@@ -666,30 +774,20 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
           {/* Escalação (Cartola) */}
           <TabsContent value="escalacao" className="mt-6">
-            <Tabs defaultValue="team1" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 h-12">
-                <TabsTrigger value="team1" className="text-base">
-                  <Users className="h-4 w-4 mr-2" />
-                  Time 1
-                </TabsTrigger>
-                <TabsTrigger value="team2" className="text-base">
-                  <Users className="h-4 w-4 mr-2" />
-                  Time 2
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="team1" className="mt-6">
-                <DndProvider backend={HTML5Backend}>
-                  <EscalacaoCartolaPage onNavigate={onNavigate} />
-                </DndProvider>
-              </TabsContent>
-
-              <TabsContent value="team2" className="mt-6">
-                <DndProvider backend={HTML5Backend}>
-                  <EscalacaoCartolaPage onNavigate={onNavigate} />
-                </DndProvider>
-              </TabsContent>
-            </Tabs>
+            {/* Só monta depois de carregar, para começar com a escalação salva no back. */}
+            {detalhes ? (
+              <DndProvider backend={HTML5Backend}>
+                <EscalacaoCartolaPage
+                  jogadores={jogadoresEscalaveis}
+                  eventos={eventos}
+                  escalacaoSalva={detalhes.escalacao}
+                  onSalvarEscalacao={salvarEscalacao}
+                  onRegistrarEvento={registrarEvento}
+                />
+              </DndProvider>
+            ) : (
+              <p className="text-muted-foreground">Carregando escalação...</p>
+            )}
           </TabsContent>
 
           {/* Eventos (gol / cartões) */}
@@ -699,7 +797,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                 <CardTitle>Registrar Evento</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                   <div className="space-y-2">
                     <Label>Tipo</Label>
                     <Select
@@ -769,21 +867,10 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label>Minuto</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      placeholder="Ex: 23"
-                      value={newEvent.minuto}
-                      onChange={(e) => setNewEvent({ ...newEvent, minuto: e.target.value })}
-                    />
-                  </div>
                 </div>
                 <Button
                   className="mt-4 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
-                  disabled={!detalhes || !newEvent.jogadorId || !newEvent.minuto}
+                  disabled={!detalhes || !newEvent.jogadorId}
                   onClick={handleAddEvent}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -806,17 +893,25 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   {eventos.map((event) => (
                     <div key={event.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
-                        <Badge variant="outline">{event.minuto}'</Badge>
+                        {event.minuto !== null && <Badge variant="outline">{event.minuto}'</Badge>}
                         {event.tipo === 'gol' && <span>⚽</span>}
                         {event.tipo === 'amarelo' && <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>}
                         {event.tipo === 'vermelho' && <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>}
+                        {event.tipo === 'substituicao' && <ArrowLeftRight className="h-4 w-4 text-emerald-600" />}
                         <div>
-                          <p className="font-medium">
-                            {event.jogadorNome}
-                            {event.assistJogadorNome && (
-                              <span className="text-sm text-muted-foreground"> (assist: {event.assistJogadorNome})</span>
-                            )}
-                          </p>
+                          {event.tipo === 'substituicao' ? (
+                            <p className="font-medium">
+                              <span className="text-emerald-700">Entra {event.entraJogadorNome}</span>
+                              <span className="text-sm text-muted-foreground"> · sai {event.jogadorNome}</span>
+                            </p>
+                          ) : (
+                            <p className="font-medium">
+                              {event.jogadorNome}
+                              {event.assistJogadorNome && (
+                                <span className="text-sm text-muted-foreground"> (assist: {event.assistJogadorNome})</span>
+                              )}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -826,7 +921,9 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                           size="sm"
                           className="text-destructive hover:bg-destructive/10"
                           aria-label="Remover evento"
-                          title="Remover evento (cancela a multa do cartão, se ainda não foi paga)"
+                          title={event.tipo === 'substituicao'
+                            ? 'Remover substituição (quem saiu volta a poder jogar)'
+                            : 'Remover evento (cancela a multa do cartão, se ainda não foi paga)'}
                           onClick={() => handleRemoverEvento(event.id)}
                         >
                           <Trash2 className="h-4 w-4" />

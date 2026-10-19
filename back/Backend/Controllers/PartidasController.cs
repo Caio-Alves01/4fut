@@ -16,7 +16,10 @@ namespace Backend.Controllers
     {
         private static readonly string[] StatusPartida = { "agendada", "em_andamento", "finalizada" };
         private static readonly string[] Confirmacoes = { "pendente", "confirmado", "recusado" };
-        private static readonly string[] TiposEvento = { "gol", "amarelo", "vermelho" };
+        private static readonly string[] TiposEvento = { "gol", "amarelo", "vermelho", "substituicao" };
+        // Precisa bater com os esquemas do front (EscalacaoCartolaPage: FORMACOES).
+        private static readonly string[] Esquemas = { "4-4-2", "4-3-3", "3-5-2", "4-2-3-1" };
+        private const int PosicoesPorTime = 11;
 
         private readonly AppDbContext _db;
         private readonly FinanceiroService _financeiro;
@@ -121,9 +124,14 @@ namespace Backend.Controllers
             partida.ScoreTeam1 = request.ScoreTeam1;
             partida.ScoreTeam2 = request.ScoreTeam2;
 
-            // Avulso só é cobrado em partida finalizada: finalizar (ou reabrir) muda as cobranças.
             if (mudouStatus)
+            {
+                await AjustarPresencasAoMudarStatus(partida);
+                await _db.SaveChangesAsync(); // a sincronização abaixo lê as presenças do banco
+
+                // Avulso só é cobrado em partida finalizada: finalizar (ou reabrir) muda as cobranças.
                 await _financeiro.SincronizarAvulsosDaPartidaAsync(pelada, partida);
+            }
 
             await _db.SaveChangesAsync();
 
@@ -143,6 +151,7 @@ namespace Backend.Controllers
 
             _db.PartidaPresencas.RemoveRange(_db.PartidaPresencas.Where(p => p.PartidaId == id));
             _db.PartidaEventos.RemoveRange(_db.PartidaEventos.Where(e => e.PartidaId == id));
+            _db.PartidaEscalados.RemoveRange(_db.PartidaEscalados.Where(e => e.PartidaId == id));
             await _financeiro.RemoverCobrancasAsync(_db.Cobrancas.Where(c => c.PartidaId == id), desligarPartida: true);
             _db.Partidas.Remove(partida);
             await _db.SaveChangesAsync();
@@ -166,11 +175,12 @@ namespace Backend.Controllers
                 return NotFound();
 
             var presencas = await _db.PartidaPresencas.Where(p => p.PartidaId == id).ToListAsync();
-            var eventos = await _db.PartidaEventos.Where(e => e.PartidaId == id).OrderBy(e => e.Minuto).ToListAsync();
+            var eventos = await _db.PartidaEventos.Where(e => e.PartidaId == id).OrderBy(e => e.Id).ToListAsync(); // ordem em que os lances foram registrados
             var jogadores = await _db.Jogadores.Where(j => j.PeladaId == peladaId).ToListAsync();
 
             var idsComRegistro = presencas.Select(p => p.JogadorId)
                 .Concat(eventos.Select(e => e.JogadorId))
+                .Concat(eventos.Where(e => e.EntraJogadorId is not null).Select(e => e.EntraJogadorId!.Value))
                 .ToHashSet();
 
             var listaPresenca = jogadores
@@ -186,7 +196,83 @@ namespace Backend.Controllers
             var nomes = jogadores.ToDictionary(j => j.Id, j => j.Name);
             var listaEventos = eventos.Select(e => ParaEvento(e, nomes)).ToList();
 
-            return Ok(new PartidaDetalhesResponse(ParaResponse(partida), listaPresenca, listaEventos));
+            var escalados = await _db.PartidaEscalados.Where(e => e.PartidaId == id).ToListAsync();
+
+            return Ok(new PartidaDetalhesResponse(ParaResponse(partida), listaPresenca, listaEventos, ParaEscalacao(partida, escalados)));
+        }
+
+        // Salva a escalação dos dois times de uma vez (substitui a anterior).
+        [HttpPut("{id}/escalacao")]
+        public async Task<ActionResult<List<EscalacaoTimeDto>>> AtualizarEscalacao(int peladaId, int id, UpdateEscalacaoRequest request)
+        {
+            var pelada = await GetPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return NotFound();
+
+            var partida = await _db.Partidas.SingleOrDefaultAsync(p => p.Id == id && p.PeladaId == peladaId);
+            if (partida is null)
+                return NotFound();
+
+            if (request.Times is null || request.Times.Count != 2 || request.Times.Select(t => t.Time).Distinct().Count() != 2
+                || request.Times.Any(t => t.Time != 1 && t.Time != 2))
+                return BadRequest("Envie a escalação do Time 1 e do Time 2.");
+
+            foreach (var time in request.Times)
+            {
+                if (!Esquemas.Contains(time.Esquema))
+                    return BadRequest("Esquema tático inválido.");
+                if (time.Jogadores is null || time.Jogadores.Count != PosicoesPorTime)
+                    return BadRequest($"Cada time deve ter {PosicoesPorTime} posições.");
+            }
+
+            var ids = request.Times.SelectMany(t => t.Jogadores).Where(j => j is not null).Select(j => j!.Value).ToList();
+            if (ids.Count != ids.Distinct().Count())
+                return BadRequest("Um jogador não pode estar em duas posições ou nos dois times.");
+
+            var idsDaPelada = await _db.Jogadores
+                .Where(j => j.PeladaId == peladaId && ids.Contains(j.Id))
+                .Select(j => j.Id)
+                .ToListAsync();
+            if (idsDaPelada.Count != ids.Count)
+                return BadRequest("Jogador não encontrado nesta pelada.");
+
+            // Apaga a antiga antes de gravar a nova, para não bater nos índices únicos (posição/jogador).
+            await using var dbTransaction = await _db.Database.BeginTransactionAsync();
+            _db.PartidaEscalados.RemoveRange(_db.PartidaEscalados.Where(e => e.PartidaId == id));
+            await _db.SaveChangesAsync();
+
+            var novos = new List<PartidaEscalado>();
+            foreach (var time in request.Times)
+            {
+                if (time.Time == 1) partida.EsquemaTime1 = time.Esquema;
+                else partida.EsquemaTime2 = time.Esquema;
+
+                for (var posicao = 0; posicao < PosicoesPorTime; posicao++)
+                {
+                    var jogadorId = time.Jogadores[posicao];
+                    if (jogadorId is not null)
+                        novos.Add(new PartidaEscalado { PartidaId = id, Time = time.Time, Posicao = posicao, JogadorId = jogadorId.Value });
+                }
+            }
+            _db.PartidaEscalados.AddRange(novos);
+
+            await _db.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
+
+            return Ok(ParaEscalacao(partida, novos));
+        }
+
+        private static List<EscalacaoTimeDto> ParaEscalacao(Partida partida, List<PartidaEscalado> escalados)
+        {
+            EscalacaoTimeDto DoTime(int time, string esquema)
+            {
+                var jogadores = new List<int?>(new int?[PosicoesPorTime]);
+                foreach (var e in escalados.Where(e => e.Time == time && e.Posicao >= 0 && e.Posicao < PosicoesPorTime))
+                    jogadores[e.Posicao] = e.JogadorId;
+                return new EscalacaoTimeDto(time, esquema, jogadores);
+            }
+
+            return new List<EscalacaoTimeDto> { DoTime(1, partida.EsquemaTime1), DoTime(2, partida.EsquemaTime2) };
         }
 
         [HttpPut("{id}/presencas/{jogadorId}")]
@@ -240,7 +326,7 @@ namespace Backend.Controllers
             if (request.Time != 1 && request.Time != 2)
                 return BadRequest("O time deve ser 1 ou 2.");
 
-            if (request.Minuto < 0 || request.Minuto > 200)
+            if (request.Minuto is < 0 or > 200)
                 return BadRequest("Minuto inválido.");
 
             var jogador = await _db.Jogadores.SingleOrDefaultAsync(j => j.Id == request.JogadorId && j.PeladaId == peladaId);
@@ -258,6 +344,31 @@ namespace Backend.Controllers
                     return BadRequest("Jogador da assistência não encontrado nesta pelada.");
             }
 
+            // Substituição: JogadorId sai, EntraJogadorId entra. Quem já saiu nesta partida não volta.
+            Jogador? entra = null;
+            if (request.Tipo == "substituicao")
+            {
+                if (request.EntraJogadorId is null || request.EntraJogadorId == request.JogadorId)
+                    return BadRequest("Informe quem entra no lugar do jogador.");
+
+                entra = await _db.Jogadores.SingleOrDefaultAsync(j => j.Id == request.EntraJogadorId && j.PeladaId == peladaId);
+                if (entra is null)
+                    return BadRequest("Jogador que entra não encontrado nesta pelada.");
+
+                var jaSairam = await _db.PartidaEventos
+                    .Where(e => e.PartidaId == id && e.Tipo == "substituicao")
+                    .Select(e => e.JogadorId)
+                    .ToListAsync();
+                if (jaSairam.Contains(jogador.Id))
+                    return BadRequest($"{jogador.Name} já foi substituído nesta partida.");
+                if (jaSairam.Contains(entra.Id))
+                    return BadRequest($"{entra.Name} já foi substituído e não pode voltar nesta partida.");
+            }
+            else if (request.EntraJogadorId is not null)
+            {
+                return BadRequest("Só a substituição tem jogador que entra.");
+            }
+
             await using var dbTransaction = await _db.Database.BeginTransactionAsync();
 
             var evento = new PartidaEvento
@@ -265,6 +376,7 @@ namespace Backend.Controllers
                 PartidaId = id,
                 JogadorId = jogador.Id,
                 AssistJogadorId = assistente?.Id,
+                EntraJogadorId = entra?.Id,
                 Tipo = request.Tipo,
                 Minuto = request.Minuto,
                 Time = request.Time,
@@ -280,6 +392,8 @@ namespace Backend.Controllers
             var nomes = new Dictionary<int, string> { [jogador.Id] = jogador.Name };
             if (assistente is not null)
                 nomes[assistente.Id] = assistente.Name;
+            if (entra is not null)
+                nomes[entra.Id] = entra.Name;
 
             return Ok(ParaEvento(evento, nomes));
         }
@@ -306,6 +420,54 @@ namespace Backend.Controllers
             return Ok();
         }
 
+        // Antes de finalizar, a presença guarda só a confirmação; "compareceu" (Presente) só existe com a
+        // partida finalizada. Ao finalizar, passa a valer como presente quem confirmou, quem está na
+        // escalação e quem teve lance (menos quem foi marcado como faltante/recusado). Ao reabrir,
+        // ninguém fica como presente de novo, mas as confirmações continuam.
+        private async Task AjustarPresencasAoMudarStatus(Partida partida)
+        {
+            var presencas = await _db.PartidaPresencas.Where(p => p.PartidaId == partida.Id).ToListAsync();
+
+            if (partida.Status != "finalizada")
+            {
+                foreach (var p in presencas)
+                    p.Presente = false;
+                return;
+            }
+
+            var escalados = await _db.PartidaEscalados.Where(e => e.PartidaId == partida.Id).Select(e => e.JogadorId).ToListAsync();
+            var eventos = await _db.PartidaEventos.Where(e => e.PartidaId == partida.Id).ToListAsync();
+            var jogaram = escalados
+                .Concat(eventos.Select(e => e.JogadorId))
+                .Concat(eventos.Where(e => e.AssistJogadorId is not null).Select(e => e.AssistJogadorId!.Value))
+                .Concat(eventos.Where(e => e.EntraJogadorId is not null).Select(e => e.EntraJogadorId!.Value))
+                .ToHashSet();
+
+            foreach (var p in presencas)
+            {
+                if (p.Confirmacao == "recusado")
+                    continue;
+                if (p.Confirmacao == "confirmado" || jogaram.Contains(p.JogadorId))
+                {
+                    p.Confirmacao = "confirmado";
+                    p.Presente = true;
+                }
+            }
+
+            // Quem jogou mas nunca teve a presença mexida (não tem linha ainda).
+            var comPresenca = presencas.Select(p => p.JogadorId).ToHashSet();
+            foreach (var jogadorId in jogaram.Where(id => !comPresenca.Contains(id)))
+            {
+                _db.PartidaPresencas.Add(new PartidaPresenca
+                {
+                    PartidaId = partida.Id,
+                    JogadorId = jogadorId,
+                    Confirmacao = "confirmado",
+                    Presente = true,
+                });
+            }
+        }
+
         // O placar passa a ser a contagem dos gols registrados.
         private async Task RecalcularPlacar(Partida partida)
         {
@@ -325,6 +487,8 @@ namespace Backend.Controllers
             new(e.Id, e.Tipo, e.JogadorId, nomes.GetValueOrDefault(e.JogadorId, "Jogador removido"),
                 e.AssistJogadorId,
                 e.AssistJogadorId is null ? null : nomes.GetValueOrDefault(e.AssistJogadorId.Value, "Jogador removido"),
-                e.Minuto, e.Time);
+                e.Minuto, e.Time,
+                e.EntraJogadorId,
+                e.EntraJogadorId is null ? null : nomes.GetValueOrDefault(e.EntraJogadorId.Value, "Jogador removido"));
     }
 }

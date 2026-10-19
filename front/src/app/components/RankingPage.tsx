@@ -1,99 +1,168 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
-import { 
-  Trophy, 
-  Target, 
-  AlertTriangle, 
-  Users, 
+import {
+  Trophy,
+  Target,
+  AlertTriangle,
+  Users,
   Calendar,
   DollarSign,
   Medal,
   TrendingUp,
-  ArrowLeft
+  ArrowLeft,
+  Footprints,
+  Star
 } from "lucide-react";
+import { api, ApiError } from "../lib/api";
+import { posicaoNome } from "./positions";
 
 interface RankingPageProps {
   peladaId: number;
   onNavigate: (page: string, peladaId?: number) => void;
 }
 
+// GET /peladas/{id}/jogadores: gols, cartões, jogos e nota já vêm calculados das partidas
+// (ver Services/EstatisticasService.cs no back).
+interface Jogador {
+  id: number;
+  name: string;
+  position: string;
+  status: string;
+  gols: number;
+  assistencias: number;
+  cartoesAmarelos: number;
+  cartoesVermelhos: number;
+  jogos: number;
+  nota: number;
+}
+
+interface Partida {
+  id: number;
+  status: string;
+}
+
+// GET /peladas/{id}/financeiro/a-receber: só o que importa para saber quem está com pendência.
+interface ItemAReceber {
+  jogadorId: number;
+}
+
+function totalCartoes(j: Jogador) {
+  return j.cartoesAmarelos + j.cartoesVermelhos;
+}
+
+function getMedalColor(position: number) {
+  switch (position) {
+    case 1: return "text-yellow-500";
+    case 2: return "text-gray-400";
+    case 3: return "text-orange-600";
+    default: return "text-muted-foreground";
+  }
+}
+
+// Pega as duas primeiras iniciais do nome, ex: "João da Silva" -> "JD"
+function getInitials(name: string) {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .map((parte) => parte[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2);
+}
+
+function formatarMedia(valor: number) {
+  return valor.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+}
+
+function SemDados({ texto }: { texto: string }) {
+  return <p className="text-sm text-muted-foreground text-center py-8">{texto}</p>;
+}
+
 export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
-  const artilheiros = [
-    { id: 1, name: "João Silva", gols: 12, jogos: 8, media: 1.5 },
-    { id: 2, name: "Pedro Santos", gols: 9, jogos: 7, media: 1.3 },
-    { id: 3, name: "Carlos Lima", gols: 7, jogos: 6, media: 1.2 },
-    { id: 4, name: "Rafael Costa", gols: 6, jogos: 8, media: 0.8 },
-    { id: 5, name: "André Souza", gols: 5, jogos: 5, media: 1.0 },
-  ];
+  const [jogadores, setJogadores] = useState<Jogador[]>([]);
+  const [partidasJogadas, setPartidasJogadas] = useState(0);
+  // null = não deu para carregar o financeiro (a aba individual mostra "—" no pagamento).
+  const [comPendencia, setComPendencia] = useState<Set<number> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const cartoes = [
-    { id: 1, name: "Fernando Silva", amarelos: 5, vermelhos: 1, total: 6 },
-    { id: 2, name: "Roberto Lima", amarelos: 4, vermelhos: 0, total: 4 },
-    { id: 3, name: "Marcos Santos", amarelos: 3, vermelhos: 1, total: 4 },
-    { id: 4, name: "Diego Costa", amarelos: 3, vermelhos: 0, total: 3 },
-    { id: 5, name: "Luis Fernandes", amarelos: 2, vermelhos: 0, total: 2 },
-  ];
+  useEffect(() => {
+    async function carregar() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [listaJogadores, partidas] = await Promise.all([
+          api.get<Jogador[]>(`/peladas/${peladaId}/jogadores`),
+          api.get<Partida[]>(`/peladas/${peladaId}/partidas`),
+        ]);
+        setJogadores(listaJogadores);
+        setPartidasJogadas(partidas.filter((p) => p.status === 'finalizada').length);
+      } catch (err) {
+        setError(err instanceof ApiError ? 'Não foi possível carregar o ranking.' : 'Não foi possível conectar ao servidor.');
+      } finally {
+        setLoading(false);
+      }
 
-  const estatisticasIndividuais = [
-    { 
-      id: 1, 
-      name: "João Silva", 
-      gols: 12, 
-      presenca: 95, 
-      faltas: 3, 
-      pagamentos: "Em dia",
-      position: "Atacante"
-    },
-    { 
-      id: 2, 
-      name: "Pedro Santos", 
-      gols: 9, 
-      presenca: 85, 
-      faltas: 1, 
-      pagamentos: "Em dia",
-      position: "Meio-campo"
-    },
-    { 
-      id: 3, 
-      name: "Carlos Lima", 
-      gols: 7, 
-      presenca: 75, 
-      faltas: 2, 
-      pagamentos: "Atrasado",
-      position: "Zagueiro"
-    },
-    { 
-      id: 4, 
-      name: "Rafael Costa", 
-      gols: 6, 
-      presenca: 90, 
-      faltas: 0, 
-      pagamentos: "Em dia",
-      position: "Goleiro"
-    },
-  ];
-
-  function getMedalColor(position: number) {
-    switch (position) {
-      case 1: return "text-yellow-500";
-      case 2: return "text-gray-400";
-      case 3: return "text-orange-600";
-      default: return "text-muted-foreground";
+      try {
+        const aReceber = await api.get<ItemAReceber[]>(`/peladas/${peladaId}/financeiro/a-receber`);
+        setComPendencia(new Set(aReceber.map((i) => i.jogadorId)));
+      } catch {
+        setComPendencia(null);
+      }
     }
+    carregar();
+  }, [peladaId]);
+
+  if (loading) {
+    return <p className="text-muted-foreground">Carregando ranking...</p>;
   }
 
-  // Pega as iniciais do nome, ex: "João Silva" -> "JS"
-  function getInitials(name: string) {
-    const partesDoNome = name.split(' ');
-    let iniciais = '';
-    for (const parte of partesDoNome) {
-      iniciais += parte[0];
-    }
-    return iniciais;
+  const totalGols = jogadores.reduce((soma, j) => soma + j.gols, 0);
+  const jogadoresAtivos = jogadores.filter((j) => j.status === 'ativo').length;
+  const mediaGolsPorJogo = partidasJogadas > 0 ? totalGols / partidasJogadas : 0;
+
+  // Empates: no artilheiro/assistências fica na frente quem tem menos jogos (melhor aproveitamento).
+  const artilheiros = jogadores
+    .filter((j) => j.gols > 0)
+    .sort((a, b) => b.gols - a.gols || a.jogos - b.jogos || a.name.localeCompare(b.name));
+
+  const garcons = jogadores
+    .filter((j) => j.assistencias > 0)
+    .sort((a, b) => b.assistencias - a.assistencias || a.jogos - b.jogos || a.name.localeCompare(b.name));
+
+  const cartoes = jogadores
+    .filter((j) => totalCartoes(j) > 0)
+    .sort((a, b) => totalCartoes(b) - totalCartoes(a) || a.name.localeCompare(b.name));
+
+  const individuais = [...jogadores].sort((a, b) => a.name.localeCompare(b.name));
+
+  function linhaRanking(jogador: Jogador, index: number, detalhe: string, valor: number, unidade: string, corValor: string) {
+    return (
+      <div key={jogador.id} className="flex items-center justify-between p-4 border rounded-lg gap-4">
+        <div className="flex items-center space-x-4 min-w-0">
+          <div className="flex items-center space-x-2">
+            <Medal className={`h-6 w-6 ${getMedalColor(index + 1)}`} />
+            <span className="text-lg font-semibold">#{index + 1}</span>
+          </div>
+          <Avatar>
+            <AvatarFallback>{getInitials(jogador.name)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <h4 className="truncate">{jogador.name}</h4>
+            <p className="text-sm text-muted-foreground">{detalhe}</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className={`text-2xl font-semibold ${corValor}`}>{valor}</p>
+          <p className="text-sm text-muted-foreground">{unidade}</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -115,6 +184,8 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
         </div>
       </div>
 
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
       {/* Resumo Geral */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -123,7 +194,7 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
               <Target className="h-5 w-5 text-blue-600" />
               <div>
                 <p className="text-sm text-muted-foreground">Total de Gols</p>
-                <p className="text-xl font-semibold">47</p>
+                <p className="text-xl font-semibold">{totalGols}</p>
               </div>
             </div>
           </CardContent>
@@ -135,7 +206,7 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
               <Users className="h-5 w-5 text-green-600" />
               <div>
                 <p className="text-sm text-muted-foreground">Jogadores Ativos</p>
-                <p className="text-xl font-semibold">24</p>
+                <p className="text-xl font-semibold">{jogadoresAtivos}</p>
               </div>
             </div>
           </CardContent>
@@ -147,7 +218,7 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
               <Calendar className="h-5 w-5 text-purple-600" />
               <div>
                 <p className="text-sm text-muted-foreground">Partidas Jogadas</p>
-                <p className="text-xl font-semibold">12</p>
+                <p className="text-xl font-semibold">{partidasJogadas}</p>
               </div>
             </div>
           </CardContent>
@@ -159,7 +230,7 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
               <TrendingUp className="h-5 w-5 text-orange-600" />
               <div>
                 <p className="text-sm text-muted-foreground">Média Gols/Jogo</p>
-                <p className="text-xl font-semibold">3.9</p>
+                <p className="text-xl font-semibold">{formatarMedia(mediaGolsPorJogo)}</p>
               </div>
             </div>
           </CardContent>
@@ -167,8 +238,9 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
       </div>
 
       <Tabs defaultValue="artilheiros" className="w-full">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="artilheiros">Artilheiros</TabsTrigger>
+          <TabsTrigger value="assistencias">Assistências</TabsTrigger>
           <TabsTrigger value="cartoes">Cartões</TabsTrigger>
           <TabsTrigger value="individual">Estatísticas Individuais</TabsTrigger>
         </TabsList>
@@ -183,30 +255,45 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {artilheiros.map((jogador, index) => (
-                  <div key={jogador.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center space-x-2">
-                        <Medal className={`h-6 w-6 ${getMedalColor(index + 1)}`} />
-                        <span className="text-lg font-semibold">#{index + 1}</span>
-                      </div>
-                      <Avatar>
-                        <AvatarImage src={`/avatar-${jogador.id}.jpg`} />
-                        <AvatarFallback>{getInitials(jogador.name)}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <h4>{jogador.name}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {jogador.jogos} jogos • Média: {jogador.media} gols/jogo
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-semibold text-primary">{jogador.gols}</p>
-                      <p className="text-sm text-muted-foreground">gols</p>
-                    </div>
-                  </div>
-                ))}
+                {artilheiros.length === 0 && <SemDados texto="Nenhum gol registrado ainda." />}
+                {artilheiros.map((jogador, index) =>
+                  linhaRanking(
+                    jogador,
+                    index,
+                    jogador.jogos > 0
+                      ? `${jogador.jogos} jogos • Média: ${formatarMedia(jogador.gols / jogador.jogos)} gols/jogo`
+                      : 'Nenhuma partida finalizada',
+                    jogador.gols,
+                    jogador.gols === 1 ? 'gol' : 'gols',
+                    'text-primary',
+                  )
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="assistencias" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Footprints className="h-5 w-5 text-blue-500" />
+                Ranking de Assistências
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {garcons.length === 0 && <SemDados texto="Nenhuma assistência registrada ainda." />}
+                {garcons.map((jogador, index) =>
+                  linhaRanking(
+                    jogador,
+                    index,
+                    `${jogador.jogos} jogos • ${jogador.gols} ${jogador.gols === 1 ? 'gol' : 'gols'}`,
+                    jogador.assistencias,
+                    jogador.assistencias === 1 ? 'assistência' : 'assistências',
+                    'text-blue-600',
+                  )
+                )}
               </div>
             </CardContent>
           </Card>
@@ -222,31 +309,31 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {cartoes.length === 0 && <SemDados texto="Nenhum cartão registrado ainda." />}
                 {cartoes.map((jogador, index) => (
-                  <div key={jogador.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="flex items-center space-x-4">
+                  <div key={jogador.id} className="flex items-center justify-between p-4 border rounded-lg gap-4">
+                    <div className="flex items-center space-x-4 min-w-0">
                       <span className="text-lg font-semibold">#{index + 1}</span>
                       <Avatar>
-                        <AvatarImage src={`/avatar-${jogador.id}.jpg`} />
                         <AvatarFallback>{getInitials(jogador.name)}</AvatarFallback>
                       </Avatar>
-                      <div>
-                        <h4>{jogador.name}</h4>
+                      <div className="min-w-0">
+                        <h4 className="truncate">{jogador.name}</h4>
                         <div className="flex items-center gap-3 text-sm">
-                          <div className="flex items-center gap-1">
-                            <div className="w-3 h-3 bg-yellow-400 rounded"></div>
-                            <span>{jogador.amarelos}</span>
+                          <div className="flex items-center gap-1" title="Cartões amarelos">
+                            <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>
+                            <span>{jogador.cartoesAmarelos}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <div className="w-3 h-3 bg-red-500 rounded"></div>
-                            <span>{jogador.vermelhos}</span>
+                          <div className="flex items-center gap-1" title="Cartões vermelhos">
+                            <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>
+                            <span>{jogador.cartoesVermelhos}</span>
                           </div>
                         </div>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-semibold text-red-600">{jogador.total}</p>
-                      <p className="text-sm text-muted-foreground">cartões</p>
+                      <p className="text-2xl font-semibold text-red-600">{totalCartoes(jogador)}</p>
+                      <p className="text-sm text-muted-foreground">{totalCartoes(jogador) === 1 ? 'cartão' : 'cartões'}</p>
                     </div>
                   </div>
                 ))}
@@ -262,71 +349,94 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
-                {estatisticasIndividuais.map((jogador) => {
-                  const pagamentoEmDia = jogador.pagamentos === 'Em dia';
+                {individuais.length === 0 && <SemDados texto="Nenhum jogador cadastrado nesta pelada." />}
+                {individuais.map((jogador) => {
+                  // Presença: em quantas das partidas finalizadas o jogador jogou.
+                  const presenca = partidasJogadas > 0 ? Math.min(100, Math.round((jogador.jogos / partidasJogadas) * 100)) : 0;
+                  const pendente = comPendencia?.has(jogador.id) ?? false;
+                  const pagamento = comPendencia === null ? '—' : pendente ? 'Pendente' : 'Em dia';
                   return (
-                  <div key={jogador.id} className="p-4 border rounded-lg">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center space-x-3">
-                        <Avatar>
-                          <AvatarImage src={`/avatar-${jogador.id}.jpg`} />
-                          <AvatarFallback>{getInitials(jogador.name)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h4>{jogador.name}</h4>
-                          <p className="text-sm text-muted-foreground">{jogador.position}</p>
+                    <div key={jogador.id} className="p-4 border rounded-lg">
+                      <div className="flex items-center justify-between mb-4 gap-2">
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <Avatar>
+                            <AvatarFallback>{getInitials(jogador.name)}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <h4 className="truncate">{jogador.name}</h4>
+                            <p className="text-sm text-muted-foreground">{posicaoNome(jogador.position)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="flex items-center gap-1">
+                            <Star className="h-3 w-3 text-yellow-500" />
+                            {jogador.jogos > 0 ? jogador.nota.toFixed(1) : '—'}
+                          </Badge>
+                          {comPendencia !== null && (
+                            <Badge variant={pendente ? 'destructive' : 'default'}>{pagamento}</Badge>
+                          )}
                         </div>
                       </div>
-                      <Badge variant={pagamentoEmDia ? 'default' : 'destructive'}>
-                        {jogador.pagamentos}
-                      </Badge>
+
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Gols</span>
+                            <span className="font-semibold">{jogador.gols}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Target className="h-4 w-4 text-blue-500" />
+                            <span className="text-sm">Artilharia</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Assistências</span>
+                            <span className="font-semibold">{jogador.assistencias}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Footprints className="h-4 w-4 text-blue-500" />
+                            <span className="text-sm">Garçom</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Presença</span>
+                            <span className="font-semibold">{presenca}%</span>
+                          </div>
+                          <Progress value={presenca} className="h-2" />
+                          <p className="text-xs text-muted-foreground">{jogador.jogos} de {partidasJogadas} partidas</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Cartões</span>
+                            <span className="font-semibold">{totalCartoes(jogador)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>
+                            <span>{jogador.cartoesAmarelos}</span>
+                            <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm ml-1"></div>
+                            <span>{jogador.cartoesVermelhos}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Pagamentos</span>
+                            <span className={`font-semibold ${comPendencia === null ? '' : pendente ? 'text-red-600' : 'text-green-600'}`}>
+                              {pagamento}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <DollarSign className={`h-4 w-4 ${pendente ? 'text-red-500' : 'text-green-500'}`} />
+                            <span className="text-sm">Financeiro</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Gols</span>
-                          <span className="font-semibold">{jogador.gols}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Target className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm">Artilheiro</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Presença</span>
-                          <span className="font-semibold">{jogador.presenca}%</span>
-                        </div>
-                        <Progress value={jogador.presenca} className="h-2" />
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Faltas</span>
-                          <span className="font-semibold">{jogador.faltas}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4 text-orange-500" />
-                          <span className="text-sm">Disciplina</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Pagamentos</span>
-                          <span className={`font-semibold ${pagamentoEmDia ? 'text-green-600' : 'text-red-600'}`}>
-                            {jogador.pagamentos}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <DollarSign className={`h-4 w-4 ${pagamentoEmDia ? 'text-green-500' : 'text-red-500'}`} />
-                          <span className="text-sm">Financeiro</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                   );
                 })}
               </div>

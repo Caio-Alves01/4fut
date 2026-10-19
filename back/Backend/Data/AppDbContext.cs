@@ -14,6 +14,7 @@ namespace Backend.Data
         public DbSet<Transacao> Transacoes => Set<Transacao>();
         public DbSet<PartidaPresenca> PartidaPresencas => Set<PartidaPresenca>();
         public DbSet<PartidaEvento> PartidaEventos => Set<PartidaEvento>();
+        public DbSet<PartidaEscalado> PartidaEscalados => Set<PartidaEscalado>();
         public DbSet<MensalidadePagamento> MensalidadePagamentos => Set<MensalidadePagamento>();
         public DbSet<Cobranca> Cobrancas => Set<Cobranca>();
 
@@ -84,6 +85,23 @@ namespace Backend.Data
             modelBuilder.Entity<PartidaEvento>()
                 .Property(e => e.Tipo)
                 .HasMaxLength(20);
+
+            // Partidas que já existiam antes da escalação começam no 4-4-2.
+            modelBuilder.Entity<Partida>(partida =>
+            {
+                partida.Property(p => p.EsquemaTime1).HasMaxLength(10).HasDefaultValue("4-4-2");
+                partida.Property(p => p.EsquemaTime2).HasMaxLength(10).HasDefaultValue("4-4-2");
+                partida.Property(p => p.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+
+            // Um jogador por posição de cada time, e cada jogador uma vez só por partida.
+            modelBuilder.Entity<PartidaEscalado>()
+                .HasIndex(e => new { e.PartidaId, e.Time, e.Posicao })
+                .IsUnique();
+
+            modelBuilder.Entity<PartidaEscalado>()
+                .HasIndex(e => new { e.PartidaId, e.JogadorId })
+                .IsUnique();
 
             // Um pagamento por jogador por mês: o banco barra pagar o mesmo mês duas vezes.
             modelBuilder.Entity<MensalidadePagamento>()

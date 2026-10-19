@@ -14,7 +14,8 @@ namespace Backend.DTOs
         int Assistencias,
         int CartoesAmarelos,
         int CartoesVermelhos,
-        int Jogos);
+        int Jogos,
+        double Nota);
 
     // BirthDate é nullable só para o back conseguir responder "obrigatório" quando ela não vem
     // (com DateOnly puro, a falta viraria 01/01/0001 e passaria como maior de idade).

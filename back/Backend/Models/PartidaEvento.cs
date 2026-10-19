@@ -8,8 +8,11 @@ namespace Backend.Models
         public int JogadorId { get; set; }
         public int? AssistJogadorId { get; set; } // só para gol
 
-        public string Tipo { get; set; } = "gol"; // gol | amarelo | vermelho
-        public int Minuto { get; set; }
+        // Só para substituição: quem entrou. JogadorId é quem saiu (e não pode voltar na partida).
+        public int? EntraJogadorId { get; set; }
+
+        public string Tipo { get; set; } = "gol"; // gol | amarelo | vermelho | substituicao
+        public int? Minuto { get; set; } // opcional: a tela registra só o lance, sem minutagem
         public int Time { get; set; } = 1;        // 1 | 2
     }
 }

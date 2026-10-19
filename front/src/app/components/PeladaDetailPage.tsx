@@ -26,7 +26,9 @@ import {
   AlertTriangle,
   Medal,
   Shield,
-  UserMinus
+  UserMinus,
+  ArrowDownCircle,
+  CalendarPlus
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
@@ -103,6 +105,37 @@ interface PeladaDetail {
   balance: number;
   nextMatch: NextMatch | null;
   destaques: Destaques;
+  atividades: Atividade[];
+}
+
+// Item de "Atividades Recentes" (montado no back a partir de partidas, jogadores e caixa).
+interface Atividade {
+  tipo: 'agendada' | 'partida' | 'jogador' | 'pagamento' | 'despesa';
+  titulo: string;
+  descricao: string;
+  data: string;
+}
+
+const ICONE_ATIVIDADE: Record<Atividade['tipo'], { icone: typeof Calendar; fundo: string; cor: string }> = {
+  agendada: { icone: CalendarPlus, fundo: 'bg-purple-100', cor: 'text-purple-600' },
+  partida: { icone: Calendar, fundo: 'bg-green-100', cor: 'text-green-600' },
+  jogador: { icone: Users, fundo: 'bg-blue-100', cor: 'text-blue-600' },
+  pagamento: { icone: DollarSign, fundo: 'bg-emerald-100', cor: 'text-emerald-600' },
+  despesa: { icone: ArrowDownCircle, fundo: 'bg-red-100', cor: 'text-red-600' },
+};
+
+// "Hoje", "Ontem", "Há 3 dias"... comparando só o dia, para o fuso não mudar o texto.
+function tempoAtras(data: string): string {
+  const dia = new Date(data);
+  const hoje = new Date();
+  const inicio = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dias = Math.round((inicio(hoje) - inicio(dia)) / 86_400_000);
+
+  if (dias < 0) return dia.toLocaleDateString('pt-BR');
+  if (dias === 0) return 'Hoje';
+  if (dias === 1) return 'Ontem';
+  if (dias < 30) return `Há ${dias} dias`;
+  return dia.toLocaleDateString('pt-BR');
 }
 
 export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps) {
@@ -565,6 +598,9 @@ export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps
                 </div>
               </div>
             )}
+            {!pelada.destaques.maisIndisciplinado && (
+              <p className="text-sm text-muted-foreground p-3 border rounded-lg">Nenhum cartão registrado ainda.</p>
+            )}
 
             {pelada.destaques.inadimplentes > 0 && (
               <div className="flex items-center justify-between p-3 border border-orange-200 bg-orange-50 rounded-lg">
@@ -595,35 +631,27 @@ export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="flex items-center gap-4 p-3 border rounded-lg">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Calendar className="h-5 w-5 text-green-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Partida realizada</p>
-                <p className="text-sm text-muted-foreground">Time A 5 x 3 Time B - Há 2 dias</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 p-3 border rounded-lg">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                <Users className="h-5 w-5 text-blue-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Novo jogador adicionado</p>
-                <p className="text-sm text-muted-foreground">Carlos Silva entrou na pelada - Há 3 dias</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 p-3 border rounded-lg">
-              <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-                <DollarSign className="h-5 w-5 text-emerald-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Pagamento recebido</p>
-                <p className="text-sm text-muted-foreground">R$ 30,00 de Pedro Santos - Há 5 dias</p>
-              </div>
-            </div>
+            {pelada.atividades.length === 0 && (
+              <p className="text-sm text-muted-foreground p-3 border rounded-lg">
+                Nenhuma atividade ainda. Partidas agendadas e realizadas, jogadores novos e pagamentos aparecem aqui.
+              </p>
+            )}
+            {pelada.atividades.map((atividade, i) => {
+              const { icone: Icone, fundo, cor } = ICONE_ATIVIDADE[atividade.tipo] ?? ICONE_ATIVIDADE.partida;
+              return (
+                <div key={i} className="flex items-center gap-4 p-3 border rounded-lg">
+                  <div className={`w-10 h-10 ${fundo} rounded-full flex items-center justify-center shrink-0`}>
+                    <Icone className={`h-5 w-5 ${cor}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium">{atividade.titulo}</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {atividade.descricao} - {tempoAtras(atividade.data)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
