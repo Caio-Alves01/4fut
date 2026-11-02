@@ -58,8 +58,13 @@ namespace Backend.DTOs
         decimal Balance,
         NextMatchInfo? NextMatch,
         DestaquesInfo Destaques,
-        List<AtividadeInfo> Atividades
+        List<AtividadeInfo> Atividades,
+        PresencaMediaInfo? PresencaMedia
     );
+
+    // Média de jogadores presentes por partida finalizada e quanto isso representa do elenco ativo (0..100).
+    // null quando ainda não há partida finalizada com presença marcada.
+    public record PresencaMediaInfo(double MediaJogadores, int Percentual, int PartidasConsideradas);
 
     // Item de "Atividades Recentes". Tipo: agendada | partida | jogador | pagamento | despesa (define o ícone no front).
     public record AtividadeInfo(string Tipo, string Titulo, string Descricao, DateTime Data);

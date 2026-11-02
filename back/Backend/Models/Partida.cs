@@ -20,5 +20,9 @@ namespace Backend.Models
 
         // Quando a partida foi agendada (aparece nas Atividades Recentes da pelada).
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // Token do link público (somente leitura) com o placar, indicadores e escalação.
+        // null = não compartilhada. Gerar um novo invalida o link anterior.
+        public string? ShareToken { get; set; }
     }
 }

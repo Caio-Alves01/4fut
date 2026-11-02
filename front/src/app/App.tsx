@@ -9,6 +9,9 @@ import { PartidasPage } from './components/PartidasPage';
 import { FinancasPage } from './components/FinancasPage';
 import { RankingPage } from './components/RankingPage';
 import { AccountPage } from './components/AccountPage';
+import { FinanceiroPublicoPage } from './components/FinanceiroPublicoPage';
+import { PartidaPublicaPage } from './components/PartidaPublicaPage';
+import { linkPublicoDaUrlAtual } from './lib/linkPublico';
 import { Button } from './components/ui/button';
 import { LogOut, Trophy, User } from 'lucide-react';
 
@@ -33,6 +36,15 @@ export default function App() {
       setCurrentPage(page);
     }
   };
+
+  // Links compartilhados (dashboard financeiro e partida): abrem sem login, para qualquer pessoa.
+  const linkAberto = linkPublicoDaUrlAtual();
+  if (linkAberto?.tipo === 'financeiro') {
+    return <FinanceiroPublicoPage token={linkAberto.token} />;
+  }
+  if (linkAberto?.tipo === 'partida') {
+    return <PartidaPublicaPage token={linkAberto.token} />;
+  }
 
   if (!isAuthenticated) {
     if (currentPage === 'register') {

@@ -56,7 +56,9 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { EscalacaoCartolaPage, EscalacaoJogador, EscalacaoTime, TipoEvento } from './EscalacaoCartolaPage';
+import { EscalacaoCartolaPage, EscalacaoJogador, EscalacaoTime, TipoEvento, jogadoresExpulsos, eventosDeExpulsaoPorAmarelos } from './EscalacaoCartolaPage';
+import { ArbitrosPartida, Arbitro } from './ArbitrosPartida';
+import { CompartilharLinkDialog } from './CompartilharLinkDialog';
 import { api, ApiError } from '../lib/api';
 
 // Formatos devolvidos por GET /partidas/{id}/detalhes (presença e eventos ficam salvos no back).
@@ -103,6 +105,7 @@ interface PartidaDetalhes {
   presencas: Presenca[];
   eventos: GameEvent[];
   escalacao: EscalacaoTime[];
+  arbitros: Arbitro[];
 }
 
 interface PartidasPageProps {
@@ -131,6 +134,12 @@ function situacaoPresenca(p: Presenca, partidaFinalizada: boolean): SituacaoPres
 // Busca sem diferenciar maiúsculas nem acentos ("joao" encontra "João").
 function normalizarBusca(texto: string): string {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+// Mais recente primeiro: data, depois horário e, no empate, a agendada por último.
+// A data vem como "2026-09-25T00:00:00", então a comparação de texto já segue a ordem cronológica.
+function compararMaisRecente(a: Match, b: Match): number {
+  return b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.id - a.id;
 }
 
 interface MatchForm {
@@ -261,6 +270,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const [confirmarFinalizacao, setConfirmarFinalizacao] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
   const [buscaPresenca, setBuscaPresenca] = useState('');
+  const [compartilhandoPartida, setCompartilhandoPartida] = useState(false);
 
 
   // Erros de data no passado. Na edição só vale se o usuário mudou data ou horário
@@ -272,8 +282,10 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
   const jogadoresAtivos = jogadores.filter(j => j.status === 'ativo').length;
 
-  const upcomingMatches = matches.filter(m => m.status === 'agendada');
-  const pastMatches = matches.filter(m => m.status === 'finalizada');
+  // Histórico com a mais recente no topo; nas próximas, a mais perto de acontecer vem primeiro.
+  const porMaisRecente = [...matches].sort(compararMaisRecente);
+  const upcomingMatches = porMaisRecente.filter(m => m.status === 'agendada').reverse();
+  const pastMatches = porMaisRecente.filter(m => m.status === 'finalizada');
 
   // Soma o placar de todas as partidas já realizadas.
   let totalGolsMarcados = 0;
@@ -465,6 +477,24 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     }
   }
 
+  // Salva os juízes da partida (a lista inteira, a cada mudança).
+  async function salvarArbitros(arbitros: Arbitro[]): Promise<boolean> {
+    if (!selectedMatch) return false;
+
+    setDetalhesError(null);
+    try {
+      const salvos = await api.put<Arbitro[]>(
+        `/peladas/${peladaId}/partidas/${selectedMatch.id}/arbitros`,
+        { arbitros },
+      );
+      setDetalhes((atuais) => (atuais ? { ...atuais, arbitros: salvos } : atuais));
+      return true;
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível salvar os juízes da partida.'));
+      return false;
+    }
+  }
+
   async function handleRemoverEvento(eventoId: number) {
     if (!selectedMatch) return;
 
@@ -523,6 +553,13 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
     const eventos = detalhes?.eventos ?? [];
     const partidaFinalizada = selectedMatch.status === 'finalizada';
 
+    // 2 amarelos = expulso: o 2º amarelo vale como vermelho (é o único cartão cobrado) e o jogador
+    // não pode ter mais lances (o back também barra).
+    const expulsos = jogadoresExpulsos(eventos);
+    const expulsoesPorAmarelos = eventosDeExpulsaoPorAmarelos(eventos);
+    const totalVermelhos = eventos.filter(e => e.tipo === 'vermelho').length + expulsoesPorAmarelos.size;
+    const presencasSemExpulsos = presencas.filter((p) => !expulsos.has(p.jogadorId));
+
     const situacoes = new Map(presencas.map((p) => [p.jogadorId, situacaoPresenca(p, partidaFinalizada)]));
     const totalPresentes = presencas.filter((p) => situacoes.get(p.jogadorId) === 'presente').length;
     const totalFaltantes = presencas.filter((p) => situacoes.get(p.jogadorId) === 'faltante').length;
@@ -553,16 +590,16 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button 
-            variant="outline" 
+        <div className="flex items-center gap-4 flex-wrap">
+          <Button
+            variant="outline"
             onClick={() => setShowEscalacao(false)}
             className="flex items-center gap-2 border-2 hover:bg-muted transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             Voltar para Partidas
           </Button>
-          <div className="flex-1">
+          <div className="flex-1 min-w-48">
             <h1>Escalação e Eventos da Partida</h1>
             <p className="text-muted-foreground">
               {new Date(selectedMatch.date).toLocaleDateString('pt-BR', { 
@@ -572,6 +609,14 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               })} às {selectedMatch.time} - {selectedMatch.location}
             </p>
           </div>
+          <Button
+            variant="outline"
+            className="flex items-center gap-2 border-2 hover:bg-secondary hover:text-white transition-colors"
+            onClick={() => setCompartilhandoPartida(true)}
+          >
+            <Share2 className="h-4 w-4" />
+            Compartilhar
+          </Button>
           {selectedMatch.status !== 'finalizada' ? (
             <Button
               className="flex items-center gap-2 bg-primary hover:bg-verde-escuro transition-colors shadow-brasil"
@@ -587,6 +632,16 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
         {detalhesError && <p className="text-sm text-destructive">{detalhesError}</p>}
         {!detalhes && !detalhesError && <p className="text-muted-foreground">Carregando presença e eventos...</p>}
+
+        <CompartilharLinkDialog
+          open={compartilhandoPartida}
+          onOpenChange={setCompartilhandoPartida}
+          endpoint={`/peladas/${peladaId}/partidas/${selectedMatch.id}/compartilhamento`}
+          tipo="partida"
+          titulo="Compartilhar partida"
+          descricao="Quem tiver o link vê, sem precisar de login, o placar, os indicadores (gols, assistências, cartões
+            e substituições), a escalação dos dois times e a arbitragem. Presença e dados financeiros não aparecem."
+        />
 
         <AlertDialog open={confirmarFinalizacao} onOpenChange={(open) => { if (!finalizando) setConfirmarFinalizacao(open); }}>
           <AlertDialogContent>
@@ -649,9 +704,12 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
               <div className="text-center p-4 bg-red-50 rounded-lg">
                 <div className="w-6 h-8 bg-red-600 border-2 border-red-800 rounded-sm mx-auto mb-2"></div>
                 <p className="text-3xl font-bold text-red-700">
-                  {eventos.filter(e => e.tipo === 'vermelho').length}
+                  {totalVermelhos}
                 </p>
-                <p className="text-sm text-muted-foreground mt-1">Vermelhos</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Vermelhos
+                  {expulsoesPorAmarelos.size > 0 && ` (${expulsoesPorAmarelos.size} por 2 amarelos)`}
+                </p>
               </div>
             </div>
 
@@ -788,6 +846,11 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
             ) : (
               <p className="text-muted-foreground">Carregando escalação...</p>
             )}
+            {detalhes && (
+              <div className="mt-6">
+                <ArbitrosPartida arbitros={detalhes.arbitros} onSalvar={salvarArbitros} />
+              </div>
+            )}
           </TabsContent>
 
           {/* Eventos (gol / cartões) */}
@@ -825,7 +888,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                         <SelectValue placeholder="Selecione" />
                       </SelectTrigger>
                       <SelectContent>
-                        {presencas.map((p) => (
+                        {presencasSemExpulsos.map((p) => (
                           <SelectItem key={p.jogadorId} value={String(p.jogadorId)}>{p.nome}</SelectItem>
                         ))}
                       </SelectContent>
@@ -844,7 +907,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Sem assistência</SelectItem>
-                          {presencas.filter(p => String(p.jogadorId) !== newEvent.jogadorId).map((p) => (
+                          {presencasSemExpulsos.filter(p => String(p.jogadorId) !== newEvent.jogadorId).map((p) => (
                             <SelectItem key={p.jogadorId} value={String(p.jogadorId)}>{p.nome}</SelectItem>
                           ))}
                         </SelectContent>
@@ -895,7 +958,14 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                       <div className="flex items-center gap-3">
                         {event.minuto !== null && <Badge variant="outline">{event.minuto}'</Badge>}
                         {event.tipo === 'gol' && <span>⚽</span>}
-                        {event.tipo === 'amarelo' && <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>}
+                        {event.tipo === 'amarelo' && !expulsoesPorAmarelos.has(event.id) && <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>}
+                        {/* 2º amarelo: amarelo + vermelho sobrepostos */}
+                        {event.tipo === 'amarelo' && expulsoesPorAmarelos.has(event.id) && (
+                          <div className="relative w-4 h-4" title="2º amarelo: expulso">
+                            <div className="absolute left-0 top-0 w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>
+                            <div className="absolute left-1.5 top-0.5 w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>
+                          </div>
+                        )}
                         {event.tipo === 'vermelho' && <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm"></div>}
                         {event.tipo === 'substituicao' && <ArrowLeftRight className="h-4 w-4 text-emerald-600" />}
                         <div>
@@ -910,6 +980,12 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                               {event.assistJogadorNome && (
                                 <span className="text-sm text-muted-foreground"> (assist: {event.assistJogadorNome})</span>
                               )}
+                              {expulsoesPorAmarelos.has(event.id) && (
+                                <Badge className="ml-2 bg-red-100 text-red-800 hover:bg-red-100">2º amarelo · expulso</Badge>
+                              )}
+                              {event.tipo === 'vermelho' && (
+                                <Badge className="ml-2 bg-red-100 text-red-800 hover:bg-red-100">Expulso</Badge>
+                              )}
                             </p>
                           )}
                         </div>
@@ -923,7 +999,9 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                           aria-label="Remover evento"
                           title={event.tipo === 'substituicao'
                             ? 'Remover substituição (quem saiu volta a poder jogar)'
-                            : 'Remover evento (cancela a multa do cartão, se ainda não foi paga)'}
+                            : expulsoesPorAmarelos.has(event.id)
+                              ? 'Remover 2º amarelo (desfaz a expulsão: volta a cobrar só o 1º amarelo)'
+                              : 'Remover evento (cancela a multa do cartão, se ainda não foi paga)'}
                           onClick={() => handleRemoverEvento(event.id)}
                         >
                           <Trash2 className="h-4 w-4" />

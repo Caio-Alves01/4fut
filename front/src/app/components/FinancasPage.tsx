@@ -46,6 +46,8 @@ import {
   SelectValue,
 } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { DashboardFinanceiro } from './DashboardFinanceiro';
+import { CompartilharLinkDialog } from './CompartilharLinkDialog';
 import {
   Table,
   TableBody,
@@ -140,11 +142,11 @@ const TIPOS_A_RECEBER: Record<TipoAReceber, { nome: string; classes: string }> =
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-function nomeCategoria(categoria: string): string {
+export function nomeCategoria(categoria: string): string {
   return CATEGORIAS_MANUAIS.find((c) => c.valor === categoria)?.nome ?? CATEGORIAS_AUTOMATICAS[categoria] ?? categoria;
 }
 
-function formatarMoeda(valor: number): string {
+export function formatarMoeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
@@ -230,6 +232,9 @@ export function FinancasPage({ peladaId, onNavigate }: FinancasPageProps) {
 
   // A receber
   const [filtroAReceber, setFiltroAReceber] = useState<'todos' | 'mensalidade' | 'avulso' | 'cartao'>('todos');
+
+  // Compartilhar o dashboard por link público
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
   useEffect(() => {
     carregarTudo();
@@ -503,10 +508,7 @@ export function FinancasPage({ peladaId, onNavigate }: FinancasPageProps) {
           <Button
             variant="outline"
             className="flex items-center gap-2 border-2 hover:bg-secondary hover:text-white transition-colors"
-            onClick={() => {
-              // TODO: Implement share functionality
-              console.log('Share financial report');
-            }}
+            onClick={() => setIsShareOpen(true)}
           >
             <Share2 className="h-4 w-4" />
             Compartilhar
@@ -894,54 +896,32 @@ export function FinancasPage({ peladaId, onNavigate }: FinancasPageProps) {
 
         {/* ---------- Dashboard ---------- */}
         <TabsContent value="dashboard" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Receitas vs Despesas (Últimos 6 meses)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center border-2 border-dashed rounded-lg">
-                  <div className="text-center text-muted-foreground">
-                    <TrendingUp className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>Gráfico de barras comparativo</p>
-                    <p className="text-sm mt-1">Receitas vs Despesas mensais</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Distribuição por Categoria</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center border-2 border-dashed rounded-lg">
-                  <div className="text-center text-muted-foreground">
-                    <DollarSign className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>Gráfico de pizza</p>
-                    <p className="text-sm mt-1">Despesas por categoria</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>Fluxo de Caixa</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center border-2 border-dashed rounded-lg">
-                  <div className="text-center text-muted-foreground">
-                    <Wallet className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>Gráfico de linha</p>
-                    <p className="text-sm mt-1">Evolução do saldo ao longo do tempo</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          {mensalidades ? (
+            <DashboardFinanceiro
+              transacoes={transactions}
+              mensalistas={mensalidades.mensalistas}
+              aReceber={aReceber}
+              anoAtual={mensalidades.anoAtual}
+              mesAtual={mensalidades.mesAtual}
+              nomeCategoria={nomeCategoria}
+              formatarMoeda={formatarMoeda}
+            />
+          ) : (
+            <p className="text-muted-foreground">Não foi possível montar o dashboard.</p>
+          )}
         </TabsContent>
       </Tabs>
+
+      {/* ---------- Compartilhar dashboard ---------- */}
+      <CompartilharLinkDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        endpoint={`/peladas/${peladaId}/financeiro/compartilhamento`}
+        tipo="financeiro"
+        titulo="Compartilhar dashboard"
+        descricao="Quem tiver o link vê o dashboard financeiro sem precisar de login, só para leitura. O link mostra
+          os totais, os gráficos e o valor total a receber, sem nomes de jogadores nem quem está devendo."
+      />
 
       {/* ---------- Novo lançamento ---------- */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>

@@ -23,5 +23,9 @@ namespace Backend.Models
         public decimal ValorAvulso { get; set; }          // por partida em que o avulso esteve presente
         public decimal ValorCartaoAmarelo { get; set; }
         public decimal ValorCartaoVermelho { get; set; }
+
+        // Token do link público (somente leitura) do dashboard financeiro. null = não compartilhado.
+        // Gerar um novo invalida o link anterior.
+        public string? FinanceiroShareToken { get; set; }
     }
 }

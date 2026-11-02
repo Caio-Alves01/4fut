@@ -378,62 +378,57 @@ export function RankingPage({ peladaId, onNavigate }: RankingPageProps) {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Gols</span>
-                            <span className="font-semibold">{jogador.gols}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Target className="h-4 w-4 text-blue-500" />
-                            <span className="text-sm">Artilharia</span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Assistências</span>
-                            <span className="font-semibold">{jogador.assistencias}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Footprints className="h-4 w-4 text-blue-500" />
-                            <span className="text-sm">Garçom</span>
+                      {/* Artilharia, garçom e cartões lado a lado, com o número junto do nome */}
+                      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                        <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/40 min-w-0">
+                          <Target className="h-5 w-5 shrink-0 text-blue-500" />
+                          <div className="min-w-0">
+                            <p className="text-xs text-muted-foreground">Artilharia</p>
+                            <p className="font-semibold leading-tight">
+                              {jogador.gols} <span className="text-xs font-normal text-muted-foreground">{jogador.gols === 1 ? 'gol' : 'gols'}</span>
+                            </p>
                           </div>
                         </div>
 
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Presença</span>
-                            <span className="font-semibold">{presenca}%</span>
+                        <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/40 min-w-0">
+                          <Footprints className="h-5 w-5 shrink-0 text-blue-500" />
+                          <div className="min-w-0">
+                            <p className="text-xs text-muted-foreground">Garçom</p>
+                            <p className="font-semibold leading-tight">
+                              {jogador.assistencias} <span className="text-xs font-normal text-muted-foreground">{jogador.assistencias === 1 ? 'assist.' : 'assists.'}</span>
+                            </p>
                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/40 min-w-0">
+                          <AlertTriangle className="h-5 w-5 shrink-0 text-red-500" />
+                          <div className="min-w-0">
+                            <p className="text-xs text-muted-foreground">Cartões</p>
+                            <div className="flex items-center gap-1 font-semibold leading-tight" title={`${jogador.cartoesAmarelos} amarelos, ${jogador.cartoesVermelhos} vermelhos`}>
+                              <span className="w-2.5 h-3.5 bg-yellow-400 border border-yellow-600 rounded-sm"></span>
+                              <span>{jogador.cartoesAmarelos}</span>
+                              <span className="w-2.5 h-3.5 bg-red-600 border border-red-800 rounded-sm ml-1"></span>
+                              <span>{jogador.cartoesVermelhos}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                        <div className="space-y-2">
+                          <p className="text-sm text-muted-foreground">
+                            Presença <span className="font-semibold text-foreground">{presenca}%</span>
+                          </p>
                           <Progress value={presenca} className="h-2" />
                           <p className="text-xs text-muted-foreground">{jogador.jogos} de {partidasJogadas} partidas</p>
                         </div>
 
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Cartões</span>
-                            <span className="font-semibold">{totalCartoes(jogador)}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-sm">
-                            <div className="w-3 h-4 bg-yellow-400 border border-yellow-600 rounded-sm"></div>
-                            <span>{jogador.cartoesAmarelos}</span>
-                            <div className="w-3 h-4 bg-red-600 border border-red-800 rounded-sm ml-1"></div>
-                            <span>{jogador.cartoesVermelhos}</span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Pagamentos</span>
-                            <span className={`font-semibold ${comPendencia === null ? '' : pendente ? 'text-red-600' : 'text-green-600'}`}>
-                              {pagamento}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <DollarSign className={`h-4 w-4 ${pendente ? 'text-red-500' : 'text-green-500'}`} />
-                            <span className="text-sm">Financeiro</span>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <DollarSign className={`h-4 w-4 ${pendente ? 'text-red-500' : 'text-green-500'}`} />
+                          <span className="text-sm text-muted-foreground">Pagamentos</span>
+                          <span className={`font-semibold ${comPendencia === null ? '' : pendente ? 'text-red-600' : 'text-green-600'}`}>
+                            {pagamento}
+                          </span>
                         </div>
                       </div>
                     </div>

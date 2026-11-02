@@ -237,6 +237,46 @@ namespace Backend.Controllers
             return Ok();
         }
 
+        // ---------- Compartilhamento do dashboard (link público, somente leitura) ----------
+
+        [HttpGet("compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> GetCompartilhamento(int peladaId)
+        {
+            var pelada = await BuscarPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return NotFound();
+
+            return Ok(new CompartilhamentoResponse(pelada.FinanceiroShareToken));
+        }
+
+        // Gera o link (ou um novo, invalidando o anterior: quem tinha o link antigo perde o acesso).
+        [HttpPost("compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> GerarCompartilhamento(int peladaId)
+        {
+            var pelada = await BuscarPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return NotFound();
+
+            pelada.FinanceiroShareToken = TokenCompartilhamento.Gerar();
+            await _db.SaveChangesAsync();
+
+            return Ok(new CompartilhamentoResponse(pelada.FinanceiroShareToken));
+        }
+
+        // Desativa o link: quem o tiver passa a ver "link inválido".
+        [HttpDelete("compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> RemoverCompartilhamento(int peladaId)
+        {
+            var pelada = await BuscarPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return NotFound();
+
+            pelada.FinanceiroShareToken = null;
+            await _db.SaveChangesAsync();
+
+            return Ok(new CompartilhamentoResponse(null));
+        }
+
         private static ConfigFinanceiraResponse ParaConfig(Pelada pelada) =>
             new(pelada.ValorMensalidade, pelada.ValorAvulso, pelada.ValorCartaoAmarelo, pelada.ValorCartaoVermelho);
 

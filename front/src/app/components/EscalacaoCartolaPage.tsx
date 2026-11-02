@@ -46,6 +46,8 @@ export interface EscalacaoJogador {
 
 // Evento da partida (vem de GET /partidas/{id}/detalhes).
 export interface EscalacaoEvento {
+  /** Ordem de registro dos lances (o back devolve os eventos nessa ordem). */
+  id: number;
   tipo: 'gol' | 'amarelo' | 'vermelho' | 'substituicao';
   /** Na substituição, quem saiu */
   jogadorId: number;
@@ -56,6 +58,27 @@ export interface EscalacaoEvento {
 }
 
 export type TipoEvento = EscalacaoEvento['tipo'];
+
+// Ids dos eventos de 2º amarelo: o jogador é expulso e esse lance vale (e é cobrado) como vermelho.
+export function eventosDeExpulsaoPorAmarelos(eventos: EscalacaoEvento[]): Set<number> {
+  const amarelos = new Map<number, number>();
+  const expulsoes = new Set<number>();
+  for (const e of [...eventos].sort((a, b) => a.id - b.id)) {
+    if (e.tipo !== 'amarelo') continue;
+    const total = (amarelos.get(e.jogadorId) ?? 0) + 1;
+    amarelos.set(e.jogadorId, total);
+    if (total === 2) expulsoes.add(e.id);
+  }
+  return expulsoes;
+}
+
+// Quem foi expulso na partida (vermelho direto ou 2 amarelos). Não pode ter mais lances.
+export function jogadoresExpulsos(eventos: EscalacaoEvento[]): Set<number> {
+  const porAmarelos = eventosDeExpulsaoPorAmarelos(eventos);
+  return new Set(
+    eventos.filter((e) => e.tipo === 'vermelho' || porAmarelos.has(e.id)).map((e) => e.jogadorId),
+  );
+}
 
 type NumeroTime = 1 | 2;
 
@@ -443,7 +466,8 @@ function FieldPosition({
   onRemove,
   onRegistrar,
   onSubstituir,
-  entrouNaPartida
+  entrouNaPartida,
+  expulso
 }: {
   position: FormationPosition;
   onDrop: (playerId: number) => void;
@@ -457,6 +481,8 @@ function FieldPosition({
   onSubstituir: (entraId: number) => Promise<boolean>;
   /** Entrou no lugar de alguém nesta partida (mostra o selo de substituição) */
   entrouNaPartida: boolean;
+  /** Levou vermelho ou 2 amarelos: fica no campo marcado, mas sem registrar mais lances */
+  expulso: boolean;
 }) {
   // useDrop marca este elemento como um alvo onde um jogador arrastado pode
   // ser solto. `drop` é a ref que precisa ser colocada na div alvo.
@@ -493,57 +519,33 @@ function FieldPosition({
     >
       <div className="flex flex-col items-center gap-1">
         <div className="relative group">
-          <MenuDeLances
-            player={player}
-            time={time}
-            companheiros={companheiros}
-            reservas={reservas}
-            onRegistrar={onRegistrar}
-            onSubstituir={onSubstituir}
-          >
-            <button
-              type="button"
-              className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg cursor-pointer hover:scale-105 hover:ring-2 hover:ring-white transition-transform`}
-              title={`${player.name} · toque para registrar gol, assistência, cartão ou substituir`}
+          {expulso ? (
+            <div
+              className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg opacity-50 grayscale ring-2 ring-red-600`}
+              title={`${player.name} · expulso, não pode ter mais lances`}
             >
               {player.number}
-            </button>
-          </MenuDeLances>
-
-          {entrouNaPartida && (
-            <div
-              className="absolute top-1/2 -left-3 -translate-y-1/2 w-5 h-5 bg-white text-emerald-600 rounded-full flex items-center justify-center shadow-md border border-emerald-500"
-              title="Entrou na partida (substituição)"
+            </div>
+          ) : (
+            <MenuDeLances
+              player={player}
+              time={time}
+              companheiros={companheiros}
+              reservas={reservas}
+              onRegistrar={onRegistrar}
+              onSubstituir={onSubstituir}
             >
-              <ArrowLeftRight className="h-3 w-3" />
-            </div>
+              <button
+                type="button"
+                className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg cursor-pointer hover:scale-105 hover:ring-2 hover:ring-white transition-transform`}
+                title={`${player.name} · toque para registrar gol, assistência, cartão ou substituir`}
+              >
+                {player.number}
+              </button>
+            </MenuDeLances>
           )}
 
-          {/* Gols, assistências e cartões registrados na partida */}
-          {stats.assistencias > 0 && (
-            <div className="absolute -bottom-1 -left-1 h-5 min-w-5 px-0.5 bg-blue-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-md border-2 border-white" title="Assistências">
-              {stats.assistencias}A
-            </div>
-          )}
-          {stats.gols > 0 && (
-            <div className="absolute -top-1 -right-1 h-5 min-w-5 px-0.5 bg-green-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-md border-2 border-white" title="Gols">
-              {stats.gols}⚽
-            </div>
-          )}
-          {(stats.amarelos > 0 || stats.vermelhos > 0) && (
-            <div className="absolute -bottom-1 -right-1 flex gap-0.5">
-              {stats.amarelos > 0 && (
-                <div className="w-4 h-5 bg-yellow-400 border border-yellow-600 rounded-sm flex items-center justify-center text-xs font-bold" title="Cartões amarelos">
-                  {stats.amarelos}
-                </div>
-              )}
-              {stats.vermelhos > 0 && (
-                <div className="w-4 h-5 bg-red-600 border border-red-800 rounded-sm flex items-center justify-center text-white text-xs font-bold" title="Cartões vermelhos">
-                  {stats.vermelhos}
-                </div>
-              )}
-            </div>
-          )}
+          <MarcacoesDoJogador stats={stats} entrouNaPartida={entrouNaPartida} />
 
           <Button
             variant="ghost"
@@ -560,13 +562,72 @@ function FieldPosition({
           <span className="text-[10px] font-bold text-primary" title="Nota de desempenho">{formatarNota(player)}</span>
           <p className="text-[11px] font-medium truncate" title={player.name}>{player.name}</p>
         </div>
-        {improvisado && (
-          <span className="text-[9px] font-semibold uppercase text-white/90 bg-black/30 rounded px-1" title={`${posicaoNome(player.position)} jogando de ${posicaoNome(position.position)}`}>
-            de {position.position}
-          </span>
-        )}
+        <SelosDaPosicao expulso={expulso} improvisado={improvisado} player={player} position={position} />
       </div>
     </div>
+  );
+}
+
+// Gols, assistências, cartões e o selo de quem entrou na partida, em volta do círculo do jogador no campo.
+// Usado no campo editável e no somente leitura (link público).
+function MarcacoesDoJogador({ stats, entrouNaPartida }: { stats: MatchStats; entrouNaPartida: boolean }) {
+  return (
+    <>
+      {entrouNaPartida && (
+        <div
+          className="absolute top-1/2 -left-3 -translate-y-1/2 w-5 h-5 bg-white text-emerald-600 rounded-full flex items-center justify-center shadow-md border border-emerald-500"
+          title="Entrou na partida (substituição)"
+        >
+          <ArrowLeftRight className="h-3 w-3" />
+        </div>
+      )}
+
+      {stats.assistencias > 0 && (
+        <div className="absolute -bottom-1 -left-1 h-5 min-w-5 px-0.5 bg-blue-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-md border-2 border-white" title="Assistências">
+          {stats.assistencias}A
+        </div>
+      )}
+      {stats.gols > 0 && (
+        <div className="absolute -top-1 -right-1 h-5 min-w-5 px-0.5 bg-green-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-md border-2 border-white" title="Gols">
+          {stats.gols}⚽
+        </div>
+      )}
+      {(stats.amarelos > 0 || stats.vermelhos > 0) && (
+        <div className="absolute -bottom-1 -right-1 flex gap-0.5">
+          {stats.amarelos > 0 && (
+            <div className="w-4 h-5 bg-yellow-400 border border-yellow-600 rounded-sm flex items-center justify-center text-xs font-bold" title="Cartões amarelos">
+              {stats.amarelos}
+            </div>
+          )}
+          {stats.vermelhos > 0 && (
+            <div className="w-4 h-5 bg-red-600 border border-red-800 rounded-sm flex items-center justify-center text-white text-xs font-bold" title="Cartões vermelhos">
+              {stats.vermelhos}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Selos embaixo do nome: expulso e jogador fora da posição dele (ex: meia improvisado no ataque).
+function SelosDaPosicao({ expulso, improvisado, player, position }: {
+  expulso: boolean;
+  improvisado: boolean;
+  player: { position: string };
+  position: { position: string };
+}) {
+  return (
+    <>
+      {expulso && (
+        <span className="text-[9px] font-semibold uppercase text-white bg-red-600 rounded px-1">Expulso</span>
+      )}
+      {improvisado && (
+        <span className="text-[9px] font-semibold uppercase text-white/90 bg-black/30 rounded px-1" title={`${posicaoNome(player.position)} jogando de ${posicaoNome(position.position)}`}>
+          de {position.position}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -642,6 +703,8 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     eventos.filter((e) => e.tipo === 'substituicao' && e.entraJogadorId !== null).map((e) => e.entraJogadorId as number),
   );
   const disponiveisParaJogar = jogadores.filter((j) => !sairam.has(j.id));
+  // Expulsos continuam aparecendo na posição em que estavam, mas não entram em lances, substituições nem no sorteio.
+  const expulsos = jogadoresExpulsos(eventos);
 
   const jogadorPorId = new Map(disponiveisParaJogar.map((j) => [j.id, j]));
 
@@ -667,7 +730,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
 
   const titulares: Record<NumeroTime, EscalacaoJogador[]> = { 1: titularesDoTime(1), 2: titularesDoTime(2) };
   const idsEscalados = new Set([...titulares[1], ...titulares[2]].map((j) => j.id));
-  const reservas = disponiveisParaJogar.filter((j) => !idsEscalados.has(j.id));
+  const reservas = disponiveisParaJogar.filter((j) => !idsEscalados.has(j.id) && !expulsos.has(j.id));
 
   // Um jogador só pode estar em um dos dois times.
   const handleDrop = (time: NumeroTime, index: number, playerId: number) => {
@@ -694,7 +757,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
   // (ver sorteioTimes.ts).
   const shufflePlayers = () => {
     const vagas = (time: NumeroTime) => FORMACOES[esquemas[time]].map((slot) => slot.position);
-    const participantes = disponiveisParaJogar.map((j) => ({ id: j.id, position: j.position, desempenho: desempenhoDoJogador(j) }));
+    const participantes = disponiveisParaJogar.filter((j) => !expulsos.has(j.id)).map((j) => ({ id: j.id, position: j.position, desempenho: desempenhoDoJogador(j) }));
     const { time1, time2 } = sortearTimes(participantes, vagas(1), vagas(2));
     setEscalados({ 1: time1, 2: time2 });
   };
@@ -791,15 +854,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
           </div>
         </CardHeader>
         <CardContent>
-          <div className="relative w-full aspect-[3/4] bg-gradient-to-b from-green-600 to-green-700 rounded-lg overflow-hidden">
-            {/* Field lines */}
-            <div className="absolute inset-0">
-              <div className="absolute top-1/2 left-0 -translate-y-1/2 w-full h-0.5 bg-white/30"></div>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full"></div>
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-t-0 border-white/30"></div>
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-b-0 border-white/30"></div>
-            </div>
-
+          <Gramado>
             {/* Formation Positions */}
             {formacao.map((pos, index) => {
               const jogador = jogadorDaPosicao(pos);
@@ -812,10 +867,11 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                   onDrop={(playerId) => handleDrop(time, index, playerId)}
                   onRemove={() => handleRemove(time, index)}
                   time={time}
-                  companheiros={jogador ? titulares[time].filter((j) => j.id !== jogador.id) : []}
+                  companheiros={jogador ? titulares[time].filter((j) => j.id !== jogador.id && !expulsos.has(j.id)) : []}
                   onRegistrar={(evento) => onRegistrarEvento({ ...evento, time })}
                   reservas={reservas}
                   entrouNaPartida={jogador !== null && entraram.has(jogador.id)}
+                  expulso={jogador !== null && expulsos.has(jogador.id)}
                   onSubstituir={async (entraId) => {
                     if (!jogador) return false;
                     // Primeiro registra o lance; só se der certo troca na escalação.
@@ -838,7 +894,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                 />
               );
             })}
-          </div>
+          </Gramado>
         </CardContent>
       </Card>
     );
@@ -996,6 +1052,117 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
         </>
       )}
 
+    </div>
+  );
+}
+
+// Campo (gramado com as linhas). As posições dos jogadores vão por cima, em % do campo.
+function Gramado({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative w-full aspect-[3/4] bg-gradient-to-b from-green-600 to-green-700 rounded-lg overflow-hidden">
+      <div className="absolute inset-0">
+        <div className="absolute top-1/2 left-0 -translate-y-1/2 w-full h-0.5 bg-white/30"></div>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full"></div>
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-t-0 border-white/30"></div>
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-b-0 border-white/30"></div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Jogador como aparece no link público: sem nota, presença ou tipo (mensalista/avulso). */
+export interface JogadorSomenteLeitura {
+  id: number;
+  name: string;
+  position: string;
+  number: number;
+}
+
+// Escalação dos dois times só para ver (link público da partida): sem arrastar, sem lances e sem notas.
+// Mostra as mesmas marcações do campo editável (gols, assistências, cartões, substituição e expulsão).
+export function EscalacaoSomenteLeitura({ escalacao, eventos, jogadores }: {
+  escalacao: EscalacaoTime[];
+  eventos: EscalacaoEvento[];
+  jogadores: JogadorSomenteLeitura[];
+}) {
+  const { esquemas, escalados } = estadoInicial(escalacao);
+  const jogadorPorId = new Map(jogadores.map((j) => [j.id, j]));
+  const expulsos = jogadoresExpulsos(eventos);
+  const entraram = new Set(
+    eventos.filter((e) => e.tipo === 'substituicao' && e.entraJogadorId !== null).map((e) => e.entraJogadorId as number),
+  );
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {TIMES.map((time) => {
+        const { porJogador } = statsDoTime(eventos, time);
+        const formacao = FORMACOES[esquemas[time]];
+        const titulares = escalados[time].filter((id) => id !== null).length;
+        return (
+          <Card key={time}>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Time {time}
+                  <Badge variant="secondary">{titulares}/{TOTAL_POSICOES}</Badge>
+                </span>
+                <Badge variant="outline">{esquemas[time]}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Gramado>
+                {formacao.map((slot, index) => {
+                  const id = escalados[time][index];
+                  const player = id === null ? null : jogadorPorId.get(id) ?? null;
+                  if (!player) {
+                    return (
+                      <div
+                        key={index}
+                        className="absolute"
+                        style={{ left: `${slot.x}%`, top: `${slot.y}%`, transform: 'translate(-50%, -50%)' }}
+                      >
+                        <div className="w-10 h-10 rounded-full border-2 border-dashed border-white/40 bg-white/5" />
+                        <p className="text-[10px] text-white/70 text-center mt-1">{slot.position}</p>
+                      </div>
+                    );
+                  }
+                  const expulso = expulsos.has(player.id);
+                  return (
+                    <div
+                      key={index}
+                      className="absolute"
+                      style={{ left: `${slot.x}%`, top: `${slot.y}%`, transform: 'translate(-50%, -50%)' }}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="relative">
+                          <div
+                            className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg ${expulso ? 'opacity-50 grayscale ring-2 ring-red-600' : ''}`}
+                            title={`${player.name} · ${posicaoNome(player.position)}`}
+                          >
+                            {player.number}
+                          </div>
+                          <MarcacoesDoJogador stats={porJogador.get(player.id) ?? SEM_STATS} entrouNaPartida={entraram.has(player.id)} />
+                        </div>
+                        <div className="bg-white/95 backdrop-blur-sm rounded-md shadow-lg px-1.5 py-0.5 max-w-[96px]">
+                          <p className="text-[11px] font-medium truncate text-gray-900" title={player.name}>{player.name}</p>
+                        </div>
+                        <SelosDaPosicao
+                          expulso={expulso}
+                          improvisado={player.position !== slot.position}
+                          player={player}
+                          position={slot}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Gramado>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

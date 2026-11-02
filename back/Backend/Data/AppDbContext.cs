@@ -15,6 +15,7 @@ namespace Backend.Data
         public DbSet<PartidaPresenca> PartidaPresencas => Set<PartidaPresenca>();
         public DbSet<PartidaEvento> PartidaEventos => Set<PartidaEvento>();
         public DbSet<PartidaEscalado> PartidaEscalados => Set<PartidaEscalado>();
+        public DbSet<PartidaArbitro> PartidaArbitros => Set<PartidaArbitro>();
         public DbSet<MensalidadePagamento> MensalidadePagamentos => Set<MensalidadePagamento>();
         public DbSet<Cobranca> Cobrancas => Set<Cobranca>();
 
@@ -68,6 +69,8 @@ namespace Backend.Data
                 pelada.Property(p => p.ValorAvulso).HasColumnType("decimal(18,2)");
                 pelada.Property(p => p.ValorCartaoAmarelo).HasColumnType("decimal(18,2)");
                 pelada.Property(p => p.ValorCartaoVermelho).HasColumnType("decimal(18,2)");
+                pelada.Property(p => p.FinanceiroShareToken).HasMaxLength(64);
+                pelada.HasIndex(p => p.FinanceiroShareToken).IsUnique();
             });
 
             // Uma presença por jogador por partida.
@@ -92,6 +95,8 @@ namespace Backend.Data
                 partida.Property(p => p.EsquemaTime1).HasMaxLength(10).HasDefaultValue("4-4-2");
                 partida.Property(p => p.EsquemaTime2).HasMaxLength(10).HasDefaultValue("4-4-2");
                 partida.Property(p => p.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+                partida.Property(p => p.ShareToken).HasMaxLength(64);
+                partida.HasIndex(p => p.ShareToken).IsUnique();
             });
 
             // Um jogador por posição de cada time, e cada jogador uma vez só por partida.
@@ -102,6 +107,13 @@ namespace Backend.Data
             modelBuilder.Entity<PartidaEscalado>()
                 .HasIndex(e => new { e.PartidaId, e.JogadorId })
                 .IsUnique();
+
+            modelBuilder.Entity<PartidaArbitro>(arbitro =>
+            {
+                arbitro.HasIndex(a => a.PartidaId);
+                arbitro.Property(a => a.Nome).HasMaxLength(100);
+                arbitro.Property(a => a.Funcao).HasMaxLength(20);
+            });
 
             // Um pagamento por jogador por mês: o banco barra pagar o mesmo mês duas vezes.
             modelBuilder.Entity<MensalidadePagamento>()

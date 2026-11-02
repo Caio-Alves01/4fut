@@ -169,6 +169,7 @@ namespace Backend.Controllers
             var inadimplentes = aReceber.Select(i => i.JogadorId).Distinct().Count();
 
             var destaques = new DestaquesInfo(artilheiro, melhorJogador, maisIndisciplinado, inadimplentes);
+            var presencaMedia = await CalcularPresencaMedia(id, jogadores);
 
             return Ok(new PeladaDetailResponse(
                 pelada.Id,
@@ -184,8 +185,30 @@ namespace Backend.Controllers
                 balance,
                 nextMatch,
                 destaques,
-                atividades
+                atividades,
+                presencaMedia
             ));
+        }
+
+        // Presentes = quem foi marcado como compareceu (ao finalizar, já entram quem confirmou, foi escalado
+        // ou teve lance). Partidas finalizadas sem nenhum presente ficam de fora, para não puxar a média
+        // para baixo só porque ninguém marcou a presença.
+        private async Task<PresencaMediaInfo?> CalcularPresencaMedia(int peladaId, List<Jogador> jogadores)
+        {
+            var presentesPorPartida = await _db.PartidaPresencas
+                .Where(pp => pp.Presente && _db.Partidas.Any(p => p.Id == pp.PartidaId && p.PeladaId == peladaId && p.Status == "finalizada"))
+                .GroupBy(pp => pp.PartidaId)
+                .Select(g => g.Count())
+                .ToListAsync();
+
+            if (presentesPorPartida.Count == 0)
+                return null;
+
+            var media = presentesPorPartida.Average();
+            var ativos = jogadores.Count(j => j.Status == StatusJogador.Ativo);
+            var percentual = ativos > 0 ? (int)Math.Round(Math.Min(100, media / ativos * 100)) : 0;
+
+            return new PresencaMediaInfo(Math.Round(media, 1), percentual, presentesPorPartida.Count);
         }
 
         private const int MaxAtividades = 8;

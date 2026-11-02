@@ -6,13 +6,6 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
-import {
   ArrowLeft,
   Users,
   Calendar,
@@ -25,8 +18,6 @@ import {
   BarChart3,
   AlertTriangle,
   Medal,
-  Shield,
-  UserMinus,
   ArrowDownCircle,
   CalendarPlus
 } from 'lucide-react';
@@ -36,31 +27,6 @@ interface PeladaDetailPageProps {
   peladaId: number;
   onNavigate: (page: string, peladaId?: number) => void;
 }
-
-type MemberPapel = 'organizador' | 'membro';
-type MemberStatus = 'ativo' | 'pendente' | 'inadimplente' | 'inativo';
-
-interface PeladaMember {
-  id: number;
-  name: string;
-  position: string;
-  papel: MemberPapel;
-  status: MemberStatus;
-}
-
-const statusVariant: Record<MemberStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  ativo: 'default',
-  pendente: 'secondary',
-  inadimplente: 'destructive',
-  inativo: 'outline'
-};
-
-const statusLabel: Record<MemberStatus, string> = {
-  ativo: 'Ativo',
-  pendente: 'Pendente',
-  inadimplente: 'Inadimplente',
-  inativo: 'Inativo'
-};
 
 interface NextMatch {
   date: string;
@@ -106,6 +72,16 @@ interface PeladaDetail {
   nextMatch: NextMatch | null;
   destaques: Destaques;
   atividades: Atividade[];
+  /** null enquanto não houver partida finalizada com presença marcada */
+  presencaMedia: PresencaMedia | null;
+}
+
+interface PresencaMedia {
+  /** Média de jogadores presentes por partida finalizada */
+  mediaJogadores: number;
+  /** Quanto essa média representa dos jogadores ativos (0 a 100) */
+  percentual: number;
+  partidasConsideradas: number;
 }
 
 // Item de "Atividades Recentes" (montado no back a partir de partidas, jogadores e caixa).
@@ -187,24 +163,6 @@ export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps
     } finally {
       setSaving(false);
     }
-  }
-
-  // Membros da pelada — shape derivado da antiga PeladaPage.tsx (status ativo/inadimplente),
-  // enriquecido com `papel` e os status `pendente`/`inativo` do modelo final.
-  const [members, setMembers] = useState<PeladaMember[]>([
-    { id: 1, name: "João Silva", position: "Atacante", papel: 'organizador', status: 'ativo' },
-    { id: 2, name: "Pedro Santos", position: "Meio-campo", papel: 'membro', status: 'ativo' },
-    { id: 3, name: "Carlos Lima", position: "Zagueiro", papel: 'membro', status: 'inadimplente' },
-    { id: 4, name: "Rafael Costa", position: "Goleiro", papel: 'membro', status: 'ativo' },
-    { id: 5, name: "André Souza", position: "Lateral", papel: 'membro', status: 'pendente' },
-  ]);
-
-  function updateMemberPapel(id: number, papel: MemberPapel) {
-    setMembers(members.map(m => (m.id === id ? { ...m, papel } : m)));
-  }
-
-  function updateMemberStatus(id: number, status: MemberStatus) {
-    setMembers(members.map(m => (m.id === id ? { ...m, status } : m)));
   }
 
   if (loading) {
@@ -301,53 +259,6 @@ export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps
               {error && <p className="text-sm text-destructive">{error}</p>}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Membros da Pelada
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {members.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between gap-4 p-3 border rounded-lg flex-wrap">
-                    <div>
-                      <p className="font-medium">{member.name}</p>
-                      <p className="text-sm text-muted-foreground">{member.position}</p>
-                    </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <Select value={member.papel} onValueChange={(value: MemberPapel) => updateMemberPapel(member.id, value)}>
-                        <SelectTrigger className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="organizador">Organizador</SelectItem>
-                          <SelectItem value="membro">Membro</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={member.status} onValueChange={(value: MemberStatus) => updateMemberStatus(member.id, value)}>
-                        <SelectTrigger className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ativo">Ativo</SelectItem>
-                          <SelectItem value="pendente">Pendente</SelectItem>
-                          <SelectItem value="inadimplente">Inadimplente</SelectItem>
-                          <SelectItem value="inativo">Inativo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Badge variant={statusVariant[member.status]}>{statusLabel[member.status]}</Badge>
-                      <Button size="sm" variant="outline" className="text-destructive hover:bg-destructive/10">
-                        <UserMinus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
         </div>
       )}
 
@@ -402,7 +313,22 @@ export function PeladaDetailPage({ peladaId, onNavigate }: PeladaDetailPageProps
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Presença Média</p>
-                <p className="text-3xl font-bold text-amarelo-escuro">—</p>
+                {pelada.presencaMedia ? (
+                  <>
+                    <p className="text-3xl font-bold text-amarelo-escuro">{pelada.presencaMedia.percentual}%</p>
+                    <p
+                      className="text-xs text-muted-foreground"
+                      title={`Média de ${pelada.presencaMedia.partidasConsideradas} partida(s) finalizada(s)`}
+                    >
+                      {pelada.presencaMedia.mediaJogadores.toLocaleString('pt-BR')} jogadores por partida
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-3xl font-bold text-amarelo-escuro">—</p>
+                    <p className="text-xs text-muted-foreground">Nenhuma partida finalizada</p>
+                  </>
+                )}
               </div>
               <div className="p-3 bg-amarelo-brasil/20 rounded-xl">
                 <TrendingUp className="h-10 w-10 text-amarelo-escuro" />

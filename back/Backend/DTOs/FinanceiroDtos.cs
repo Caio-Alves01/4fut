@@ -32,4 +32,23 @@ namespace Backend.DTOs
         int? Mes);
 
     public record PagarCobrancaRequest(DateOnly? PagoEm);
+
+    // ---------- Compartilhamento do dashboard ----------
+
+    // Token = null quando o dashboard não está compartilhado. O front monta o link com ele.
+    public record CompartilhamentoResponse(string? Token);
+
+    // O que o link público mostra. Só números: sem nome de jogador nem descrição de lançamento
+    // (as descrições levam nomes, ex: "Mensalidade 10/2026 - João") e sem quem deve quanto.
+    public record TransacaoPublicaResponse(string Type, decimal Amount, DateTime Date, string Category);
+    public record MesPagoResponse(int Ano, int Mes);
+    public record MensalistaPublicoResponse(string Status, List<MesPagoResponse> Pagamentos);
+
+    public record DashboardPublicoResponse(
+        string PeladaNome,
+        int AnoAtual,
+        int MesAtual,
+        List<TransacaoPublicaResponse> Transacoes,
+        List<MensalistaPublicoResponse> Mensalistas,
+        decimal TotalAReceber);
 }

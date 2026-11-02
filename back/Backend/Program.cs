@@ -49,12 +49,26 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
+    options.AddPolicy(RateLimitPolicies.Publico, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = RateLimitPolicies.PublicoLimite,
+                Window = RateLimitPolicies.PublicoJanela,
+                QueueLimit = 0,
+            }));
+
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.OnRejected = async (context, cancellationToken) =>
     {
+        var publico = context.HttpContext.Request.Path.StartsWithSegments("/api/publico");
         context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
         await context.HttpContext.Response.WriteAsync(
-            "Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.", cancellationToken);
+            publico
+                ? "Muitos acessos em pouco tempo. Aguarde um minuto e tente novamente."
+                : "Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.",
+            cancellationToken);
     };
 });
 

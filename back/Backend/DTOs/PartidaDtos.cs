@@ -16,5 +16,24 @@ namespace Backend.DTOs
     public record EscalacaoTimeDto(int Time, string Esquema, List<int?> Jogadores);
     public record UpdateEscalacaoRequest(List<EscalacaoTimeDto> Times);
 
-    public record PartidaDetalhesResponse(PartidaResponse Partida, List<PresencaResponse> Presencas, List<EventoResponse> Eventos, List<EscalacaoTimeDto> Escalacao);
+    // Juízes da partida. Funcao: principal | assistente | quarto.
+    public record ArbitroDto(string Nome, string Funcao);
+    public record UpdateArbitrosRequest(List<ArbitroDto> Arbitros);
+
+    // ---------- Link público da partida (somente leitura) ----------
+
+    // Só o necessário para os indicadores e o campo: jogadores que aparecem na escalação ou em algum lance,
+    // sem dados pessoais nem financeiros (tipo mensalista/avulso, presença, nota).
+    public record JogadorPublicoResponse(int Id, string Name, string Position, int Number);
+    public record EventoPublicoResponse(int Id, string Tipo, int JogadorId, int? AssistJogadorId, int? EntraJogadorId, int Time);
+
+    public record PartidaPublicaResponse(
+        string PeladaNome,
+        PartidaResponse Partida,
+        List<EscalacaoTimeDto> Escalacao,
+        List<EventoPublicoResponse> Eventos,
+        List<JogadorPublicoResponse> Jogadores,
+        List<ArbitroDto> Arbitros);
+
+    public record PartidaDetalhesResponse(PartidaResponse Partida, List<PresencaResponse> Presencas, List<EventoResponse> Eventos, List<EscalacaoTimeDto> Escalacao, List<ArbitroDto> Arbitros);
 }

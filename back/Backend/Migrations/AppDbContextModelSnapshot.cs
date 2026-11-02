@@ -223,6 +223,10 @@ namespace Backend.Migrations
                     b.Property<int?>("ScoreTeam2")
                         .HasColumnType("int");
 
+                    b.Property<string>("ShareToken")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("longtext");
@@ -235,7 +239,38 @@ namespace Backend.Migrations
 
                     b.HasIndex("PeladaId");
 
+                    b.HasIndex("ShareToken")
+                        .IsUnique();
+
                     b.ToTable("Partidas");
+                });
+
+            modelBuilder.Entity("Backend.Models.PartidaArbitro", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Funcao")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("PartidaId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartidaId");
+
+                    b.ToTable("PartidaArbitros");
                 });
 
             modelBuilder.Entity("Backend.Models.PartidaEscalado", b =>
@@ -359,6 +394,10 @@ namespace Backend.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<string>("FinanceiroShareToken")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<string>("Horario")
                         .IsRequired()
                         .HasColumnType("longtext");
@@ -387,6 +426,9 @@ namespace Backend.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("FinanceiroShareToken")
+                        .IsUnique();
 
                     b.ToTable("Peladas");
                 });

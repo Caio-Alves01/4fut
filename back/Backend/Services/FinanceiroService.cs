@@ -84,30 +84,59 @@ namespace Backend.Services
                 await SincronizarAvulsoAsync(pelada, partida, jogador, presencas.Single(p => p.JogadorId == jogador.Id));
         }
 
-        // Cartão registrado vira multa, se a pelada tiver valor configurado para aquele cartão.
-        public void CriarCobrancaDeCartao(Pelada pelada, Partida partida, PartidaEvento evento)
+        // Cartões viram multa, se a pelada tiver valor configurado para aquele cartão. Recalcula as multas
+        // de cartão do jogador na partida inteira (chamado ao registrar ou apagar um cartão), porque o
+        // 2º amarelo muda as anteriores: com 2 amarelos o jogador é expulso e paga só o vermelho
+        // (ligado ao evento do 2º amarelo), e a multa do 1º amarelo deixa de valer.
+        // Lê os eventos do banco: quem chama já precisa ter salvo o cartão novo (ou a remoção).
+        public async Task SincronizarCartoesAsync(Pelada pelada, Partida partida, int jogadorId)
         {
-            var (tipo, valor, nome) = evento.Tipo switch
-            {
-                "amarelo" => (TiposCobranca.CartaoAmarelo, pelada.ValorCartaoAmarelo, "Cartão amarelo"),
-                "vermelho" => (TiposCobranca.CartaoVermelho, pelada.ValorCartaoVermelho, "Cartão vermelho"),
-                _ => (null, 0m, null),
-            };
+            var cartoes = await _db.PartidaEventos
+                .Where(e => e.PartidaId == partida.Id && e.JogadorId == jogadorId && (e.Tipo == "amarelo" || e.Tipo == "vermelho"))
+                .OrderBy(e => e.Id)
+                .ToListAsync();
 
-            if (tipo is null || valor <= 0)
-                return;
+            var amarelos = cartoes.Where(e => e.Tipo == "amarelo").ToList();
+            var devidas = new List<(int EventoId, string Tipo, string Nome, decimal Valor)>();
 
-            _db.Cobrancas.Add(new Cobranca
+            if (amarelos.Count >= 2)
+                devidas.Add((amarelos[1].Id, TiposCobranca.CartaoVermelho, "Cartão vermelho (2 amarelos)", pelada.ValorCartaoVermelho));
+            else
+                devidas.AddRange(amarelos.Select(e => (e.Id, TiposCobranca.CartaoAmarelo, "Cartão amarelo", pelada.ValorCartaoAmarelo)));
+
+            devidas.AddRange(cartoes.Where(e => e.Tipo == "vermelho")
+                .Select(e => (e.Id, TiposCobranca.CartaoVermelho, "Cartão vermelho", pelada.ValorCartaoVermelho)));
+
+            var existentes = await _db.Cobrancas
+                .Where(c => c.PartidaId == partida.Id && c.JogadorId == jogadorId && c.EventoId != null
+                    && (c.Tipo == TiposCobranca.CartaoAmarelo || c.Tipo == TiposCobranca.CartaoVermelho))
+                .ToListAsync();
+
+            // Multa que deixou de valer some se ainda não foi paga (a paga fica: o dinheiro entrou).
+            foreach (var cobranca in existentes)
             {
-                PeladaId = pelada.Id,
-                JogadorId = evento.JogadorId,
-                PartidaId = partida.Id,
-                EventoId = evento.Id,
-                Tipo = tipo,
-                Descricao = $"{nome} - partida de {partida.Date:dd/MM/yyyy}",
-                Valor = valor,
-                Data = partida.Date,
-            });
+                var continuaDevida = devidas.Any(d => d.EventoId == cobranca.EventoId && d.Tipo == cobranca.Tipo);
+                if (!continuaDevida && cobranca.PagoEm is null)
+                    _db.Cobrancas.Remove(cobranca);
+            }
+
+            foreach (var (eventoId, tipo, nome, valor) in devidas)
+            {
+                if (valor <= 0 || existentes.Any(c => c.EventoId == eventoId && c.Tipo == tipo))
+                    continue;
+
+                _db.Cobrancas.Add(new Cobranca
+                {
+                    PeladaId = pelada.Id,
+                    JogadorId = jogadorId,
+                    PartidaId = partida.Id,
+                    EventoId = eventoId,
+                    Tipo = tipo,
+                    Descricao = $"{nome} - partida de {partida.Date:dd/MM/yyyy}",
+                    Valor = valor,
+                    Data = partida.Date,
+                });
+            }
         }
 
         // Evento/partida apagados: o que ainda não foi pago some; o que já foi pago fica (o dinheiro entrou),

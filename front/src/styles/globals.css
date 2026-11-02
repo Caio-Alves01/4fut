@@ -158,6 +158,10 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* Cores da marca como tema, para gerar as utilitárias de gradiente (from-/to-) do logo "4Fut".
+     Mesmos valores do :root acima. */
+  --color-verde-brasil: #009739;
+  --color-azul-brasil: #0033A0;
 }
 
 @layer base {

@@ -20,6 +20,7 @@ namespace Backend.Controllers
         // Precisa bater com os esquemas do front (EscalacaoCartolaPage: FORMACOES).
         private static readonly string[] Esquemas = { "4-4-2", "4-3-3", "3-5-2", "4-2-3-1" };
         private const int PosicoesPorTime = 11;
+        private const int MaxArbitros = 6;
 
         private readonly AppDbContext _db;
         private readonly FinanceiroService _financeiro;
@@ -56,9 +57,12 @@ namespace Backend.Controllers
             if (pelada is null)
                 return NotFound();
 
+            // Mais recente primeiro (data, depois horário; no empate, a agendada por último).
             var partidas = await _db.Partidas
                 .Where(p => p.PeladaId == peladaId)
-                .OrderBy(p => p.Date)
+                .OrderByDescending(p => p.Date)
+                .ThenByDescending(p => p.Time)
+                .ThenByDescending(p => p.Id)
                 .ToListAsync();
 
             var resposta = new List<PartidaResponse>();
@@ -152,11 +156,60 @@ namespace Backend.Controllers
             _db.PartidaPresencas.RemoveRange(_db.PartidaPresencas.Where(p => p.PartidaId == id));
             _db.PartidaEventos.RemoveRange(_db.PartidaEventos.Where(e => e.PartidaId == id));
             _db.PartidaEscalados.RemoveRange(_db.PartidaEscalados.Where(e => e.PartidaId == id));
+            _db.PartidaArbitros.RemoveRange(_db.PartidaArbitros.Where(a => a.PartidaId == id));
             await _financeiro.RemoverCobrancasAsync(_db.Cobrancas.Where(c => c.PartidaId == id), desligarPartida: true);
             _db.Partidas.Remove(partida);
             await _db.SaveChangesAsync();
 
             return Ok();
+        }
+
+        // ---------- Compartilhamento (link público com indicadores e escalação) ----------
+
+        [HttpGet("{id}/compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> GetCompartilhamento(int peladaId, int id)
+        {
+            var partida = await GetPartidaDoUsuario(peladaId, id);
+            if (partida is null)
+                return NotFound();
+
+            return Ok(new CompartilhamentoResponse(partida.ShareToken));
+        }
+
+        // Gera o link (ou um novo, invalidando o anterior).
+        [HttpPost("{id}/compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> GerarCompartilhamento(int peladaId, int id)
+        {
+            var partida = await GetPartidaDoUsuario(peladaId, id);
+            if (partida is null)
+                return NotFound();
+
+            partida.ShareToken = TokenCompartilhamento.Gerar();
+            await _db.SaveChangesAsync();
+
+            return Ok(new CompartilhamentoResponse(partida.ShareToken));
+        }
+
+        [HttpDelete("{id}/compartilhamento")]
+        public async Task<ActionResult<CompartilhamentoResponse>> RemoverCompartilhamento(int peladaId, int id)
+        {
+            var partida = await GetPartidaDoUsuario(peladaId, id);
+            if (partida is null)
+                return NotFound();
+
+            partida.ShareToken = null;
+            await _db.SaveChangesAsync();
+
+            return Ok(new CompartilhamentoResponse(null));
+        }
+
+        private async Task<Partida?> GetPartidaDoUsuario(int peladaId, int id)
+        {
+            var pelada = await GetPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return null;
+
+            return await _db.Partidas.SingleOrDefaultAsync(p => p.Id == id && p.PeladaId == peladaId);
         }
 
         // ---------- Presença e eventos ----------
@@ -197,8 +250,54 @@ namespace Backend.Controllers
             var listaEventos = eventos.Select(e => ParaEvento(e, nomes)).ToList();
 
             var escalados = await _db.PartidaEscalados.Where(e => e.PartidaId == id).ToListAsync();
+            var arbitros = await ListarArbitros(_db, id);
 
-            return Ok(new PartidaDetalhesResponse(ParaResponse(partida), listaPresenca, listaEventos, ParaEscalacao(partida, escalados)));
+            return Ok(new PartidaDetalhesResponse(ParaResponse(partida), listaPresenca, listaEventos, ParaEscalacao(partida, escalados), arbitros));
+        }
+
+        // Juízes da partida: salva a lista inteira de uma vez (substitui a anterior).
+        [HttpPut("{id}/arbitros")]
+        public async Task<ActionResult<List<ArbitroDto>>> AtualizarArbitros(int peladaId, int id, UpdateArbitrosRequest request)
+        {
+            var pelada = await GetPeladaDoUsuario(peladaId);
+            if (pelada is null)
+                return NotFound();
+
+            var partida = await _db.Partidas.SingleOrDefaultAsync(p => p.Id == id && p.PeladaId == peladaId);
+            if (partida is null)
+                return NotFound();
+
+            var arbitros = request.Arbitros ?? new List<ArbitroDto>();
+            if (arbitros.Count > MaxArbitros)
+                return BadRequest($"Uma partida pode ter no máximo {MaxArbitros} juízes.");
+
+            foreach (var arbitro in arbitros)
+            {
+                if (string.IsNullOrWhiteSpace(arbitro.Nome) || arbitro.Nome.Trim().Length > 100)
+                    return BadRequest("Informe o nome do juiz (até 100 caracteres).");
+                if (!FuncoesArbitro.Todas.Contains(arbitro.Funcao))
+                    return BadRequest("Função de juiz inválida.");
+            }
+
+            if (arbitros.Count(a => a.Funcao == FuncoesArbitro.Principal) > 1)
+                return BadRequest("A partida só pode ter um juiz principal.");
+
+            _db.PartidaArbitros.RemoveRange(_db.PartidaArbitros.Where(a => a.PartidaId == id));
+            _db.PartidaArbitros.AddRange(arbitros.Select(a => new PartidaArbitro { PartidaId = id, Nome = a.Nome.Trim(), Funcao = a.Funcao }));
+            await _db.SaveChangesAsync();
+
+            return Ok(await ListarArbitros(_db, id));
+        }
+
+        // Principal primeiro, depois assistentes e quarto árbitro; na mesma função, na ordem em que foram cadastrados.
+        // (Também usado pelo link público, no PublicoController.)
+        internal static async Task<List<ArbitroDto>> ListarArbitros(AppDbContext db, int partidaId)
+        {
+            var arbitros = await db.PartidaArbitros.Where(a => a.PartidaId == partidaId).OrderBy(a => a.Id).ToListAsync();
+            return arbitros
+                .OrderBy(a => Array.IndexOf(FuncoesArbitro.Todas, a.Funcao))
+                .Select(a => new ArbitroDto(a.Nome, a.Funcao))
+                .ToList();
         }
 
         // Salva a escalação dos dois times de uma vez (substitui a anterior).
@@ -262,7 +361,7 @@ namespace Backend.Controllers
             return Ok(ParaEscalacao(partida, novos));
         }
 
-        private static List<EscalacaoTimeDto> ParaEscalacao(Partida partida, List<PartidaEscalado> escalados)
+        internal static List<EscalacaoTimeDto> ParaEscalacao(Partida partida, List<PartidaEscalado> escalados)
         {
             EscalacaoTimeDto DoTime(int time, string esquema)
             {
@@ -369,6 +468,15 @@ namespace Backend.Controllers
                 return BadRequest("Só a substituição tem jogador que entra.");
             }
 
+            // Expulso (vermelho direto ou 2º amarelo) não participa de mais nenhum lance: não leva
+            // outro cartão, não marca, não dá assistência e não é substituído nem volta pela substituição.
+            var expulsos = await JogadoresExpulsos(id);
+            foreach (var envolvido in new[] { jogador, assistente, entra })
+            {
+                if (envolvido is not null && expulsos.Contains(envolvido.Id))
+                    return BadRequest($"{envolvido.Name} foi expulso nesta partida e não pode ter mais lances.");
+            }
+
             await using var dbTransaction = await _db.Database.BeginTransactionAsync();
 
             var evento = new PartidaEvento
@@ -384,7 +492,8 @@ namespace Backend.Controllers
             _db.PartidaEventos.Add(evento);
             await _db.SaveChangesAsync(); // gera o Id do evento, usado na cobrança do cartão
 
-            _financeiro.CriarCobrancaDeCartao(pelada, partida, evento);
+            if (EhCartao(evento.Tipo))
+                await _financeiro.SincronizarCartoesAsync(pelada, partida, evento.JogadorId);
             await RecalcularPlacar(partida);
             await _db.SaveChangesAsync();
             await dbTransaction.CommitAsync();
@@ -414,10 +523,30 @@ namespace Backend.Controllers
             await _financeiro.RemoverCobrancasAsync(_db.Cobrancas.Where(c => c.EventoId == eventoId), desligarPartida: false);
             await _db.SaveChangesAsync();
 
+            // Apagar um dos 2 amarelos desfaz a expulsão: o amarelo que sobrou volta a ser cobrado.
+            if (EhCartao(evento.Tipo))
+                await _financeiro.SincronizarCartoesAsync(pelada, partida, evento.JogadorId);
             await RecalcularPlacar(partida);
             await _db.SaveChangesAsync();
 
             return Ok();
+        }
+
+        private static bool EhCartao(string tipo) => tipo is "amarelo" or "vermelho";
+
+        // Quem já levou vermelho ou 2 amarelos nesta partida.
+        private async Task<HashSet<int>> JogadoresExpulsos(int partidaId)
+        {
+            var cartoes = await _db.PartidaEventos
+                .Where(e => e.PartidaId == partidaId && (e.Tipo == "amarelo" || e.Tipo == "vermelho"))
+                .Select(e => new { e.JogadorId, e.Tipo })
+                .ToListAsync();
+
+            return cartoes
+                .GroupBy(c => c.JogadorId)
+                .Where(g => g.Any(c => c.Tipo == "vermelho") || g.Count(c => c.Tipo == "amarelo") >= 2)
+                .Select(g => g.Key)
+                .ToHashSet();
         }
 
         // Antes de finalizar, a presença guarda só a confirmação; "compareceu" (Presente) só existe com a
@@ -480,7 +609,7 @@ namespace Backend.Controllers
             partida.ScoreTeam2 = gols.Count(t => t == 2);
         }
 
-        private static PartidaResponse ParaResponse(Partida partida) =>
+        internal static PartidaResponse ParaResponse(Partida partida) =>
             new(partida.Id, partida.Date, partida.Time, partida.Location, partida.Status, partida.ScoreTeam1, partida.ScoreTeam2);
 
         private static EventoResponse ParaEvento(PartidaEvento e, IReadOnlyDictionary<int, string> nomes) =>
