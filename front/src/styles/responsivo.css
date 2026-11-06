@@ -1,0 +1,44 @@
+/*
+ * Responsividade em 3 versões (mesmo padrão do img-cultura):
+ *   .versao-normal -> computador   (acima de 1024px)
+ *   .versao-media  -> tablet       (de 501px a 1024px)
+ *   .versao-mini   -> celular      (até 500px)
+ *
+ * Em cada parte específica da tela (cabeçalho, escalação, dias da semana)
+ * o componente monta as 3 versões e o CSS mostra só a do tamanho da tela.
+ */
+
+.versao-normal{
+    display:block !important;
+}
+.versao-media{
+    display:none !important;
+}
+.versao-mini{
+   display:none !important;
+}
+
+
+@media screen and (max-width: 1024px) {
+
+    .versao-normal{
+        display:none !important;
+    }
+    .versao-media{
+        display:block !important;
+    }
+    .versao-mini{
+       display:none !important;
+    }
+}
+@media screen and (max-width: 500px) {
+    .versao-normal{
+        display:none !important;
+    }
+    .versao-media{
+        display:none !important;
+    }
+    .versao-mini{
+       display:block !important;
+    }
+}

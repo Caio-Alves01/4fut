@@ -186,46 +186,84 @@ function DayPicker({ selected, onChange }: DayPickerProps) {
     }
   }
 
+  // Linha de um dia com checkbox (versões normal e media). O id leva a versão para não repetir no HTML.
+  function itemDia(day: DayOfWeek, versao: string, espaco: string) {
+    const config = dayConfig[day];
+    const isChecked = selected.includes(day);
+    const id = `day-${versao}-${day}`;
+    return (
+      <div
+        key={day}
+        className={`flex items-center space-x-3 ${espaco} rounded-lg border-2 transition-all cursor-pointer ${
+          isChecked
+            ? `${config.borderColor} ${config.lightBg}`
+            : 'border-transparent hover:bg-accent'
+        }`}
+        onClick={() => toggleDay(day)}
+      >
+        <Checkbox
+          id={id}
+          checked={isChecked}
+          onCheckedChange={() => toggleDay(day)}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <label
+          htmlFor={id}
+          className="flex items-center gap-3 flex-1 cursor-pointer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className={`w-4 h-4 rounded-full ${config.bgColor}`}></div>
+          <span className={isChecked ? config.color : 'text-foreground'}>
+            {config.label}
+          </span>
+        </label>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <Label>Dias da Semana *</Label>
       <p className="text-xs text-muted-foreground">
         Selecione um ou mais dias em que a pelada acontece
       </p>
-      <div className="space-y-2 border rounded-lg p-4">
-        {daysOrder.map((day) => {
-          const config = dayConfig[day];
-          const isChecked = selected.includes(day);
+      {/* Computador: lista com checkbox */}
+      <div className="versao-normal">
+        <div className="space-y-2 border rounded-lg p-4">
+          {daysOrder.map((day) => itemDia(day, 'normal', 'p-3'))}
+        </div>
+      </div>
 
-          return (
-            <div
-              key={day}
-              className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                isChecked
-                  ? `${config.borderColor} ${config.lightBg}`
-                  : 'border-transparent hover:bg-accent'
-              }`}
-              onClick={() => toggleDay(day)}
-            >
-              <Checkbox
-                id={`day-${day}`}
-                checked={isChecked}
-                onCheckedChange={() => toggleDay(day)}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <label
-                htmlFor={`day-${day}`}
-                className="flex items-center gap-3 flex-1 cursor-pointer"
-                onClick={(e) => e.stopPropagation()}
+      {/* Tablet: duas colunas, para o diálogo não ficar comprido */}
+      <div className="versao-media">
+        <div className="grid grid-cols-2 gap-2 border rounded-lg p-3">
+          {daysOrder.map((day) => itemDia(day, 'media', 'p-2.5'))}
+        </div>
+      </div>
+
+      {/* Celular: botões compactos (Seg, Ter...) que cabem na tela sem rolar muito */}
+      <div className="versao-mini">
+        <div className="grid grid-cols-4 gap-2">
+          {daysOrder.map((day) => {
+            const config = dayConfig[day];
+            const isChecked = selected.includes(day);
+            return (
+              <button
+                key={day}
+                type="button"
+                aria-pressed={isChecked}
+                aria-label={config.label}
+                onClick={() => toggleDay(day)}
+                className={`flex flex-col items-center gap-1 rounded-lg border-2 py-2 text-sm font-medium transition-all ${
+                  isChecked ? `${config.borderColor} ${config.lightBg} ${config.color}` : 'border-border bg-card text-foreground'
+                }`}
               >
-                <div className={`w-4 h-4 rounded-full ${config.bgColor}`}></div>
-                <span className={isChecked ? config.color : 'text-foreground'}>
-                  {config.label}
-                </span>
-              </label>
-            </div>
-          );
-        })}
+                <span className={`w-2.5 h-2.5 rounded-full ${config.bgColor}`}></span>
+                {config.label.slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {selected.length > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -338,7 +376,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1>Minhas Peladas</h1>
           <p className="text-muted-foreground">
@@ -636,7 +674,7 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
 
       {/* Edit Dialog */}
       <Dialog open={editingPelada !== null} onOpenChange={(open) => { if (!open) setEditingPelada(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Editar Pelada</DialogTitle>
             <DialogDescription>

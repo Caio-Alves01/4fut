@@ -666,44 +666,44 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
         {/* Match Score Summary */}
         <Card className="border-2 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-center gap-8 mb-6">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center justify-center gap-4 sm:gap-8 mb-4 sm:mb-6">
               <div className="flex-1 text-center">
                 <h3 className="mb-2">Time 1</h3>
-                <div className="text-7xl font-bold text-green-600">
+                <div className="text-5xl sm:text-7xl font-bold text-green-600">
                   {selectedMatch.scoreTeam1 || 0}
                 </div>
               </div>
               
-              <div className="text-4xl font-bold text-muted-foreground">×</div>
+              <div className="text-3xl sm:text-4xl font-bold text-muted-foreground">×</div>
               
               <div className="flex-1 text-center">
                 <h3 className="mb-2">Time 2</h3>
-                <div className="text-7xl font-bold text-blue-600">
+                <div className="text-5xl sm:text-7xl font-bold text-blue-600">
                   {selectedMatch.scoreTeam2 || 0}
                 </div>
               </div>
             </div>
 
             {/* Quick Stats Summary */}
-            <div className="grid grid-cols-3 gap-4 pt-6 border-t">
-              <div className="text-center p-4 bg-green-50 rounded-lg">
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-4 sm:pt-6 border-t">
+              <div className="text-center p-2 sm:p-4 bg-green-50 rounded-lg">
                 <Trophy className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                <p className="text-3xl font-bold text-green-600">
+                <p className="text-2xl sm:text-3xl font-bold text-green-600">
                   {(selectedMatch.scoreTeam1 || 0) + (selectedMatch.scoreTeam2 || 0)}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">Gols Total</p>
               </div>
-              <div className="text-center p-4 bg-yellow-50 rounded-lg">
+              <div className="text-center p-2 sm:p-4 bg-yellow-50 rounded-lg">
                 <div className="w-6 h-8 bg-yellow-400 border-2 border-yellow-600 rounded-sm mx-auto mb-2"></div>
-                <p className="text-3xl font-bold text-yellow-700">
+                <p className="text-2xl sm:text-3xl font-bold text-yellow-700">
                   {eventos.filter(e => e.tipo === 'amarelo').length}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">Amarelos</p>
               </div>
-              <div className="text-center p-4 bg-red-50 rounded-lg">
+              <div className="text-center p-2 sm:p-4 bg-red-50 rounded-lg">
                 <div className="w-6 h-8 bg-red-600 border-2 border-red-800 rounded-sm mx-auto mb-2"></div>
-                <p className="text-3xl font-bold text-red-700">
+                <p className="text-2xl sm:text-3xl font-bold text-red-700">
                   {totalVermelhos}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -724,17 +724,17 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
 
         {/* Presença / Escalação / Eventos */}
         <Tabs defaultValue="presenca" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 h-12">
-            <TabsTrigger value="presenca" className="text-base">
-              <ClipboardList className="h-4 w-4 mr-2" />
+          <TabsList className="grid w-full grid-cols-3 h-11 sm:h-12">
+            <TabsTrigger value="presenca" className="text-sm sm:text-base px-1">
+              <ClipboardList className="h-4 w-4 mr-1 sm:mr-2" />
               Presença
             </TabsTrigger>
-            <TabsTrigger value="escalacao" className="text-base">
-              <Users className="h-4 w-4 mr-2" />
+            <TabsTrigger value="escalacao" className="text-sm sm:text-base px-1">
+              <Users className="h-4 w-4 mr-1 sm:mr-2" />
               Escalação
             </TabsTrigger>
-            <TabsTrigger value="eventos" className="text-base">
-              <Trophy className="h-4 w-4 mr-2" />
+            <TabsTrigger value="eventos" className="text-sm sm:text-base px-1">
+              <Trophy className="h-4 w-4 mr-1 sm:mr-2" />
               Eventos
             </TabsTrigger>
           </TabsList>

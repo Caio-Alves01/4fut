@@ -236,7 +236,14 @@ function getPositionColor(position: string): string {
   return 'bg-red-500';
 }
 
-function DraggablePlayer({ player }: { player: EscalacaoJogador }) {
+function DraggablePlayer({ player, vagas, onEscalar }: {
+  player: EscalacaoJogador;
+  /** Posições livres em cada time (0 = time completo). */
+  vagas: Record<NumeroTime, number>;
+  /** Coloca o jogador numa posição livre do time (de preferência na posição dele). */
+  onEscalar: (time: NumeroTime) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
   // useDrag conecta este elemento à API de arrastar-e-soltar do react-dnd.
   // `drag` é a ref que precisa ser colocada na div que pode ser arrastada.
   const [{ isDragging }, drag] = useDrag(() => ({
@@ -247,24 +254,53 @@ function DraggablePlayer({ player }: { player: EscalacaoJogador }) {
     }),
   }), [player.id]);
 
+  // No computador dá para arrastar; no toque (celular/tablet) o arrastar do HTML5 não funciona,
+  // então tocar no jogador abre a escolha do time e ele vai para uma posição livre.
   return (
-    <div
-      ref={drag}
-      className={`cursor-move ${isDragging ? 'opacity-50' : ''}`}
-    >
-      <div className="flex items-center justify-between p-2 border rounded-lg hover:bg-accent/50 transition-colors">
-        <div className="flex items-center gap-2">
-          <div className={`w-8 h-8 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white text-xs font-bold`}>
-            {player.number}
-          </div>
-          <div>
-            <p className="text-sm font-medium">{player.name}</p>
-            <p className="text-xs text-muted-foreground">{posicaoNome(player.position)}</p>
+    <Popover open={aberto} onOpenChange={setAberto}>
+      <PopoverTrigger asChild>
+        <div
+          ref={drag}
+          role="button"
+          tabIndex={0}
+          className={`cursor-move ${isDragging ? 'opacity-50' : ''}`}
+          title="Arraste para o campo ou toque para escolher o time"
+        >
+          <div className="flex items-center justify-between gap-2 p-2 border rounded-lg bg-card hover:bg-accent/50 transition-colors">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className={`w-8 h-8 shrink-0 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white text-xs font-bold`}>
+                {player.number}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{player.name}</p>
+                <p className="text-xs text-muted-foreground">{posicaoNome(player.position)}</p>
+              </div>
+            </div>
+            <span className="text-sm font-bold text-primary shrink-0" title="Nota de desempenho">{formatarNota(player)}</span>
           </div>
         </div>
-        <span className="text-sm font-bold text-primary" title="Nota de desempenho">{formatarNota(player)}</span>
-      </div>
-    </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2" side="top">
+        <p className="text-sm font-semibold truncate px-1">{player.name}</p>
+        <p className="text-xs text-muted-foreground px-1 pb-2 mb-2 border-b">Escalar em qual time?</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {TIMES.map((time) => (
+            <Button
+              key={time}
+              size="sm"
+              variant="outline"
+              disabled={vagas[time] === 0}
+              onClick={() => { onEscalar(time); setAberto(false); }}
+            >
+              Time {time}
+            </Button>
+          ))}
+        </div>
+        {(vagas[1] === 0 || vagas[2] === 0) && (
+          <p className="text-[11px] text-muted-foreground px-1 pt-2">Time completo: tire alguém do campo para abrir vaga.</p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -280,6 +316,7 @@ function MenuDeLances({
   reservas,
   onRegistrar,
   onSubstituir,
+  onRemove,
   children,
 }: {
   player: EscalacaoJogador;
@@ -290,6 +327,8 @@ function MenuDeLances({
   onRegistrar: (evento: NovoEvento) => Promise<boolean>;
   /** Registra a substituição e coloca o reserva escolhido na mesma posição. Devolve true se deu certo. */
   onSubstituir: (entraId: number) => Promise<boolean>;
+  /** Tira o jogador do campo (volta para os disponíveis). */
+  onRemove: () => void;
   children: ReactNode;
 }) {
   const [aberto, setAberto] = useState(false);
@@ -323,7 +362,7 @@ function MenuDeLances({
       }}
     >
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className="w-56 p-2" side="top">
+      <PopoverContent className="w-56 p-2" side="top" collisionPadding={8}>
         <div className="flex items-center gap-1 px-1 pb-2 mb-2 border-b">
           {etapa !== 'menu' && (
             <button type="button" className="rounded p-0.5 hover:bg-accent" aria-label="Voltar" onClick={() => setEtapa('menu')}>
@@ -372,6 +411,14 @@ function MenuDeLances({
               onClick={() => setEtapa('substituir')}
             >
               <ArrowLeftRight className="h-4 w-4" /> Substituir
+            </button>
+            <button
+              type="button"
+              disabled={salvando}
+              className={`${acao} col-span-2 flex-row border-red-200 text-red-700 hover:bg-red-50`}
+              onClick={() => { onRemove(); setAberto(false); }}
+            >
+              <X className="h-4 w-4" /> Tirar do campo
             </button>
           </div>
         )}
@@ -455,6 +502,52 @@ function MenuDeLances({
   );
 }
 
+// Toque numa posição vazia do campo: escolhe quem entra nela (quem joga na posição aparece primeiro).
+function EscolherJogador({ vaga, reservas, onEscolher, children }: {
+  vaga: string;
+  reservas: EscalacaoJogador[];
+  onEscolher: (playerId: number) => void;
+  children: ReactNode;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const ordenados = [...reservas].sort((a, b) =>
+    Number(b.position === vaga) - Number(a.position === vaga)
+    || desempenhoDoJogador(b) - desempenhoDoJogador(a)
+    || a.name.localeCompare(b.name));
+
+  return (
+    <Popover open={aberto} onOpenChange={setAberto}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent className="w-60 p-2" side="top" collisionPadding={8}>
+        <p className="text-sm font-semibold px-1">Escalar na vaga {vaga}</p>
+        <p className="text-xs text-muted-foreground px-1 pb-2 mb-2 border-b">{posicaoNome(vaga)} · quem entra?</p>
+        <div className="max-h-60 overflow-y-auto space-y-0.5">
+          {ordenados.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+              onClick={() => { onEscolher(r.id); setAberto(false); }}
+            >
+              <span className={`w-6 h-6 shrink-0 rounded-full ${getPositionColor(r.position)} text-white text-[10px] font-bold flex items-center justify-center`}>
+                {r.number}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{r.name}</span>
+                <span className="block text-[11px] text-muted-foreground">{posicaoNome(r.position)}</span>
+              </span>
+              <span className="text-xs font-bold text-primary">{formatarNota(r)}</span>
+            </button>
+          ))}
+          {ordenados.length === 0 && (
+            <p className="text-xs text-muted-foreground px-2 py-1">Nenhum jogador disponível. Marque mais jogadores como presentes.</p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function FieldPosition({
   position,
   onDrop,
@@ -467,7 +560,8 @@ function FieldPosition({
   onRegistrar,
   onSubstituir,
   entrouNaPartida,
-  expulso
+  expulso,
+  compacto = false,
 }: {
   position: FormationPosition;
   onDrop: (playerId: number) => void;
@@ -483,7 +577,11 @@ function FieldPosition({
   entrouNaPartida: boolean;
   /** Levou vermelho ou 2 amarelos: fica no campo marcado, mas sem registrar mais lances */
   expulso: boolean;
+  /** Campo pequeno (celular e tablet): círculos e nomes menores para não encavalar. */
+  compacto?: boolean;
 }) {
+  const circulo = compacto ? 'w-9 h-9 text-sm' : 'w-12 h-12';
+  const rotulo = compacto ? 'max-w-[68px] px-1' : 'max-w-[96px] px-1.5';
   // useDrop marca este elemento como um alvo onde um jogador arrastado pode
   // ser solto. `drop` é a ref que precisa ser colocada na div alvo.
   const [{ isOver }, drop] = useDrop(() => ({
@@ -501,10 +599,17 @@ function FieldPosition({
         className={`absolute ${isOver ? 'scale-110' : ''}`}
         style={{ left: `${position.x}%`, top: `${position.y}%`, transform: 'translate(-50%, -50%)' }}
       >
-        <div className="w-12 h-12 rounded-full border-2 border-dashed border-white/50 bg-white/10 flex items-center justify-center backdrop-blur-sm">
-          <UserPlus className="h-5 w-5 text-white/70" />
-        </div>
-        <p className="text-xs text-white text-center mt-1 font-medium">{position.position}</p>
+        <EscolherJogador vaga={position.position} reservas={reservas} onEscolher={onDrop}>
+          <button
+            type="button"
+            className={`${circulo} rounded-full border-2 border-dashed border-white/50 bg-white/10 flex items-center justify-center backdrop-blur-sm hover:bg-white/25 transition-colors`}
+            aria-label={`Escalar jogador na vaga ${position.position}`}
+            title="Toque para escolher o jogador (ou arraste da lista)"
+          >
+            <UserPlus className={`${compacto ? 'h-4 w-4' : 'h-5 w-5'} text-white/70`} />
+          </button>
+        </EscolherJogador>
+        <p className={`${compacto ? 'text-[10px]' : 'text-xs'} text-white text-center mt-1 font-medium`}>{position.position}</p>
       </div>
     );
   }
@@ -521,7 +626,7 @@ function FieldPosition({
         <div className="relative group">
           {expulso ? (
             <div
-              className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg opacity-50 grayscale ring-2 ring-red-600`}
+              className={`${circulo} rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg opacity-50 grayscale ring-2 ring-red-600`}
               title={`${player.name} · expulso, não pode ter mais lances`}
             >
               {player.number}
@@ -534,10 +639,11 @@ function FieldPosition({
               reservas={reservas}
               onRegistrar={onRegistrar}
               onSubstituir={onSubstituir}
+              onRemove={onRemove}
             >
               <button
                 type="button"
-                className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg cursor-pointer hover:scale-105 hover:ring-2 hover:ring-white transition-transform`}
+                className={`${circulo} rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg cursor-pointer hover:scale-105 hover:ring-2 hover:ring-white transition-transform`}
                 title={`${player.name} · toque para registrar gol, assistência, cartão ou substituir`}
               >
                 {player.number}
@@ -550,7 +656,7 @@ function FieldPosition({
           <Button
             variant="ghost"
             size="sm"
-            className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full"
+            className={`absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 ${expulso ? '[@media(hover:none)]:opacity-100' : '[@media(hover:none)]:hidden'} transition-opacity h-6 w-6 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full`}
             aria-label="Tirar do campo"
             onClick={onRemove}
           >
@@ -558,14 +664,22 @@ function FieldPosition({
           </Button>
         </div>
 
-        <div className="bg-white/95 backdrop-blur-sm rounded-md shadow-lg px-1.5 py-0.5 max-w-[96px] flex items-center gap-1">
+        <div className={`bg-white/95 backdrop-blur-sm rounded-md shadow-lg py-0.5 ${rotulo} flex items-center gap-1`}>
           <span className="text-[10px] font-bold text-primary" title="Nota de desempenho">{formatarNota(player)}</span>
-          <p className="text-[11px] font-medium truncate" title={player.name}>{player.name}</p>
+          <p className={`${compacto ? 'text-[10px]' : 'text-[11px]'} font-medium truncate text-gray-900`} title={player.name}>
+            {compacto ? nomeCurto(player.name) : player.name}
+          </p>
         </div>
         <SelosDaPosicao expulso={expulso} improvisado={improvisado} player={player} position={position} />
       </div>
     </div>
   );
+}
+
+// "Caio Almeida Alves" -> "Caio A." (no campo pequeno o nome inteiro não cabe).
+function nomeCurto(nome: string): string {
+  const partes = nome.trim().split(/\s+/);
+  return partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1][0]}.` : partes[0];
 }
 
 // Gols, assistências, cartões e o selo de quem entrou na partida, em volta do círculo do jogador no campo.
@@ -656,6 +770,8 @@ function statsDoTime(eventos: EscalacaoEvento[], time: NumeroTime) {
 
 export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSalvarEscalacao, onRegistrarEvento }: EscalacaoCartolaPageProps) {
   const [view, setView] = useState<'campo' | 'lista'>('campo');
+  // Versão mini (celular): mostra um time por vez.
+  const [timeMini, setTimeMini] = useState<NumeroTime>(1);
   const [inicial] = useState(() => estadoInicial(escalacaoSalva));
   const [esquemas, setEsquemas] = useState<Record<NumeroTime, Esquema>>(inicial.esquemas);
   // Jogador de cada uma das 11 posições de cada time (mesmo índice do esquema escolhido).
@@ -745,6 +861,26 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     });
   };
 
+  // Toque num disponível + escolha do time: vai para a primeira vaga da posição dele,
+  // ou, se não houver, para a primeira vaga livre do time.
+  const escalarNoTime = (time: NumeroTime, playerId: number) => {
+    const jogador = jogadorPorId.get(playerId);
+    if (!jogador) return;
+    const slots = FORMACOES[esquemas[time]];
+    const livres = escalados[time]
+      .map((id, i) => ({ i, livre: id === null || !jogadorPorId.has(id) }))
+      .filter((v) => v.livre)
+      .map((v) => v.i);
+    const index = livres.find((i) => slots[i].position === jogador.position) ?? livres[0];
+    if (index === undefined) return;
+    setEscalados((atual) => {
+      if (atual[1].includes(playerId) || atual[2].includes(playerId)) return atual;
+      const doTime = [...atual[time]];
+      doTime[index] = playerId;
+      return { ...atual, [time]: doTime };
+    });
+  };
+
   const handleRemove = (time: NumeroTime, index: number) => {
     setEscalados((atual) => {
       const doTime = [...atual[time]];
@@ -810,13 +946,18 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     );
   }
 
-  function campoDoTime(time: NumeroTime) {
+  const vagas: Record<NumeroTime, number> = {
+    1: TOTAL_POSICOES - titulares[1].length,
+    2: TOTAL_POSICOES - titulares[2].length,
+  };
+
+  function campoDoTime(time: NumeroTime, compacto = false) {
     const formacao = formacaoDoTime(time);
     const { porJogador, total } = statsDoTime(eventos, time);
 
     return (
-      <Card key={time}>
-        <CardHeader className="space-y-3">
+      <Card key={time} className={compacto ? 'gap-3' : undefined}>
+        <CardHeader className={compacto ? 'space-y-2 px-3 pt-4' : 'space-y-3'}>
           <CardTitle className="flex items-center justify-between gap-2 flex-wrap">
             <span className="flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -845,6 +986,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                 key={e}
                 variant={esquemas[time] === e ? 'default' : 'ghost'}
                 size="sm"
+                className={compacto ? 'h-7 px-2 text-xs' : undefined}
                 aria-pressed={esquemas[time] === e}
                 onClick={() => setEsquemas({ ...esquemas, [time]: e })}
               >
@@ -853,8 +995,8 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
             ))}
           </div>
         </CardHeader>
-        <CardContent>
-          <Gramado>
+        <CardContent className={compacto ? 'px-2 pb-3' : undefined}>
+          <Gramado compacto={compacto}>
             {/* Formation Positions */}
             {formacao.map((pos, index) => {
               const jogador = jogadorDaPosicao(pos);
@@ -872,6 +1014,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                   reservas={reservas}
                   entrouNaPartida={jogador !== null && entraram.has(jogador.id)}
                   expulso={jogador !== null && expulsos.has(jogador.id)}
+                  compacto={compacto}
                   onSubstituir={async (entraId) => {
                     if (!jogador) return false;
                     // Primeiro registra o lance; só se der certo troca na escalação.
@@ -900,11 +1043,58 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     );
   }
 
+  function cardDisponiveis(versao: 'normal' | 'media' | 'mini') {
+    const itens = reservas.map((player) => (
+      <DraggablePlayer
+        key={player.id}
+        player={player}
+        vagas={vagas}
+        onEscalar={(time) => escalarNoTime(time, player.id)}
+      />
+    ));
+    const vazio = reservas.length === 0 && (
+      <div className="text-center py-6 text-muted-foreground">
+        <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />
+        <p className="text-sm">
+          {jogadores.length === 0
+            ? 'Nenhum jogador presente. Marque os jogadores como presentes na aba Presença.'
+            : 'Todos os jogadores foram escalados'}
+        </p>
+      </div>
+    );
+
+    return (
+      <Card className={versao === 'normal' ? 'h-full' : 'gap-3'}>
+        <CardHeader className={versao === 'mini' ? 'px-3 pt-4' : undefined}>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Disponíveis ({reservas.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent className={versao === 'mini' ? 'px-3 pb-4' : undefined}>
+          {versao === 'normal' && (
+            <ScrollArea className="h-[600px] pr-4">
+              <div className="space-y-2">{itens}{vazio}</div>
+            </ScrollArea>
+          )}
+          {/* Tablet: em grade, sem a caixa de 600px que sobrava vazia */}
+          {versao === 'media' && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">{itens}</div>
+              {vazio}
+            </>
+          )}
+          {versao === 'mini' && <div className="space-y-2">{itens}{vazio}</div>}
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Ações dos dois times + View Toggle */}
       <div className="flex justify-between items-center gap-2 flex-wrap">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
           <Button variant="outline" size="sm" onClick={shufflePlayers} disabled={disponiveisParaJogar.length === 0}>
             <Shuffle className="h-4 w-4 mr-2" />
             Sortear Times
@@ -1009,44 +1199,55 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
 
       {view === 'campo' && (
         <>
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_260px] gap-4">
-            {TIMES.map((time) => campoDoTime(time))}
+          {/* Computador: os dois campos lado a lado e a lista de disponíveis na lateral */}
+          <div className="versao-normal">
+            <div className="grid grid-cols-[1fr_1fr_260px] gap-4">
+              {TIMES.map((time) => campoDoTime(time))}
+              {cardDisponiveis('normal')}
+            </div>
+          </div>
 
-            {/* Jogadores disponíveis (servem para os dois times) */}
-            <Card className="h-full">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Disponíveis ({reservas.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[600px] pr-4">
-                  <div className="space-y-2">
-                    {reservas.map((player) => (
-                      <DraggablePlayer key={player.id} player={player} />
-                    ))}
-                    {reservas.length === 0 && (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">
-                          {jogadores.length === 0
-                            ? 'Nenhum jogador presente. Marque os jogadores como presentes na aba Presença.'
-                            : 'Todos os jogadores foram escalados'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+          {/* Tablet: os dois campos lado a lado (empilhados se a tela for estreita) e os disponíveis embaixo */}
+          <div className="versao-media">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {TIMES.map((time) => campoDoTime(time, true))}
+              </div>
+              {cardDisponiveis('media')}
+            </div>
+          </div>
+
+          {/* Celular: um time por vez (abas Time 1 / Time 2) e os disponíveis logo abaixo do campo */}
+          <div className="versao-mini">
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-1 rounded-lg border-2 p-1 bg-muted/40" role="tablist" aria-label="Time exibido">
+                {TIMES.map((time) => (
+                  <Button
+                    key={time}
+                    role="tab"
+                    aria-selected={timeMini === time}
+                    variant={timeMini === time ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setTimeMini(time)}
+                  >
+                    Time {time}
+                    <span className="ml-1 text-xs opacity-80">{titulares[time].length}/{TOTAL_POSICOES}</span>
+                  </Button>
+                ))}
+              </div>
+              {campoDoTime(timeMini, true)}
+              {cardDisponiveis('mini')}
+            </div>
           </div>
 
           <div className="p-3 bg-accent rounded-lg">
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              Arraste jogadores da lista de disponíveis para o campo de cada time, ou use Sortear Times. Toque em um jogador
-              escalado para registrar gol, assistência, cartão ou fazer uma substituição. A escalação é salva automaticamente.
+            <p className="text-sm text-muted-foreground flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Arraste jogadores da lista de disponíveis para o campo, ou toque numa posição vazia (ou num disponível)
+                para escolher. Toque num jogador escalado para registrar gol, assistência, cartão, substituir ou tirar do
+                campo. A escalação é salva automaticamente.
+              </span>
             </p>
           </div>
         </>
@@ -1057,14 +1258,14 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
 }
 
 // Campo (gramado com as linhas). As posições dos jogadores vão por cima, em % do campo.
-function Gramado({ children }: { children: ReactNode }) {
+function Gramado({ children, compacto = false }: { children: ReactNode; compacto?: boolean }) {
   return (
     <div className="relative w-full aspect-[3/4] bg-gradient-to-b from-green-600 to-green-700 rounded-lg overflow-hidden">
       <div className="absolute inset-0">
         <div className="absolute top-1/2 left-0 -translate-y-1/2 w-full h-0.5 bg-white/30"></div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-white/30 rounded-full"></div>
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-t-0 border-white/30"></div>
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-28 h-14 border-2 border-b-0 border-white/30"></div>
+        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 ${compacto ? 'w-14 h-14' : 'w-20 h-20'} border-2 border-white/30 rounded-full`}></div>
+        <div className={`absolute top-0 left-1/2 -translate-x-1/2 ${compacto ? 'w-20 h-10' : 'w-28 h-14'} border-2 border-t-0 border-white/30`}></div>
+        <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 ${compacto ? 'w-20 h-10' : 'w-28 h-14'} border-2 border-b-0 border-white/30`}></div>
       </div>
       {children}
     </div>
@@ -1123,7 +1324,7 @@ export function EscalacaoSomenteLeitura({ escalacao, eventos, jogadores }: {
                         className="absolute"
                         style={{ left: `${slot.x}%`, top: `${slot.y}%`, transform: 'translate(-50%, -50%)' }}
                       >
-                        <div className="w-10 h-10 rounded-full border-2 border-dashed border-white/40 bg-white/5" />
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-dashed border-white/40 bg-white/5" />
                         <p className="text-[10px] text-white/70 text-center mt-1">{slot.position}</p>
                       </div>
                     );
@@ -1138,14 +1339,14 @@ export function EscalacaoSomenteLeitura({ escalacao, eventos, jogadores }: {
                       <div className="flex flex-col items-center gap-1">
                         <div className="relative">
                           <div
-                            className={`w-12 h-12 rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg ${expulso ? 'opacity-50 grayscale ring-2 ring-red-600' : ''}`}
+                            className={`w-9 h-9 text-sm sm:w-12 sm:h-12 sm:text-base rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg ${expulso ? 'opacity-50 grayscale ring-2 ring-red-600' : ''}`}
                             title={`${player.name} · ${posicaoNome(player.position)}`}
                           >
                             {player.number}
                           </div>
                           <MarcacoesDoJogador stats={porJogador.get(player.id) ?? SEM_STATS} entrouNaPartida={entraram.has(player.id)} />
                         </div>
-                        <div className="bg-white/95 backdrop-blur-sm rounded-md shadow-lg px-1.5 py-0.5 max-w-[96px]">
+                        <div className="bg-white/95 backdrop-blur-sm rounded-md shadow-lg px-1 sm:px-1.5 py-0.5 max-w-[68px] sm:max-w-[96px]">
                           <p className="text-[11px] font-medium truncate text-gray-900" title={player.name}>{player.name}</p>
                         </div>
                         <SelosDaPosicao

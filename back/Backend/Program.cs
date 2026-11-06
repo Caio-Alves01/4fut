@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -92,7 +93,25 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+// Atrás do Nginx (container "web"), o IP real do usuário chega no cabeçalho X-Forwarded-For.
+// Sem isso, o rate limit veria todo mundo com o IP do Nginx e bloquearia todos juntos.
+// Pode confiar em qualquer proxy porque a API não fica exposta para fora da rede do Docker.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
+
+app.UseForwardedHeaders();
+
+// Aplica as migrations pendentes ao iniciar (cria/atualiza as tabelas do banco automaticamente).
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
+}
 
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
