@@ -8,7 +8,7 @@ namespace Backend.Services
     {
         Aprovado,
 
-        // CPF irregular, data de nascimento diferente da cadastrada na Receita ou menor de 18 anos.
+        // CPF não encontrado, data de nascimento diferente da cadastrada no fornecedor ou menor de 18 anos.
         // O motivo exato não é exposto ao usuário (mensagem neutra).
         Reprovado,
 
@@ -66,26 +66,31 @@ namespace Backend.Services
                 return ResultadoVerificacaoIdade.Reprovado;
 
             var aprovado =
-                consulta.Regular &&
                 consulta.DataNascimento == dataNascimentoInformada &&
                 Idade.Calcular(consulta.DataNascimento) >= Idade.Minima;
 
             return aprovado ? ResultadoVerificacaoIdade.Aprovado : ResultadoVerificacaoIdade.Reprovado;
         }
 
-        // Cada fornecedor tem seu próprio contrato. Este método assume:
-        //   GET {BaseUrl}/cpf/{cpf}   (Authorization: Bearer {ApiKey})
-        //   200 -> { "situacao": "REGULAR", "dataNascimento": "1990-05-20" }
-        //   404 -> CPF não encontrado
-        // Ao contratar o fornecedor, ajuste a URL, o header e os nomes dos campos aqui.
+        // CPFHub.io - Consulta Simples (https://www.cpfhub.io/openapi.json):
+        //   GET {BaseUrl}/cpf/{cpf}   (header x-api-key: {ApiKey})
+        //   200 -> { "success": true, "data": { "birthDate": "15/06/1990", ... } }   (1 crédito)
+        //   404 -> CPF não encontrado (não consome crédito)
+        //   400/422 -> CPF malformado / dígito verificador errado
+        //   401/403/429/5xx -> problema de chave, saldo, limite ou do fornecedor
+        // A Consulta Simples não traz situação cadastral; para isso existe POST /cpf/realtime.
         private async Task<ConsultaCpf?> ConsultarFornecedorAsync(string baseUrl, string apiKey, string cpf)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/cpf/{cpf}");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("x-api-key", apiKey);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var response = await _http.SendAsync(request);
 
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            // Não encontrado ou CPF recusado pelo fornecedor: problema do dado informado, não do serviço.
+            if (response.StatusCode is System.Net.HttpStatusCode.NotFound
+                                    or System.Net.HttpStatusCode.BadRequest
+                                    or System.Net.HttpStatusCode.UnprocessableEntity)
                 return null;
 
             response.EnsureSuccessStatusCode();
@@ -93,12 +98,15 @@ namespace Backend.Services
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var root = json.RootElement;
 
-            var situacao = root.GetProperty("situacao").GetString();
-            var dataNascimento = DateOnly.ParseExact(root.GetProperty("dataNascimento").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (!root.GetProperty("success").GetBoolean())
+                throw new InvalidOperationException("CPFHub respondeu 200 com success=false.");
 
-            return new ConsultaCpf(string.Equals(situacao, "REGULAR", StringComparison.OrdinalIgnoreCase), dataNascimento);
+            var data = root.GetProperty("data");
+            var dataNascimento = DateOnly.ParseExact(data.GetProperty("birthDate").GetString()!, "dd/MM/yyyy", CultureInfo.InvariantCulture);
+
+            return new ConsultaCpf(dataNascimento);
         }
 
-        private record ConsultaCpf(bool Regular, DateOnly DataNascimento);
+        private record ConsultaCpf(DateOnly DataNascimento);
     }
 }
