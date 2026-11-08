@@ -35,7 +35,7 @@ namespace Backend.Controllers
         private async Task<Pelada?> GetPeladaDoUsuario(int peladaId)
         {
             var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var pelada = await _db.Peladas.FindAsync(peladaId);
+            var pelada = await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == peladaId);
 
             if (pelada is null || pelada.OwnerUserId != userId)
                 return null;
@@ -153,12 +153,11 @@ namespace Backend.Controllers
             if (partida is null)
                 return NotFound();
 
-            _db.PartidaPresencas.RemoveRange(_db.PartidaPresencas.Where(p => p.PartidaId == id));
-            _db.PartidaEventos.RemoveRange(_db.PartidaEventos.Where(e => e.PartidaId == id));
-            _db.PartidaEscalados.RemoveRange(_db.PartidaEscalados.Where(e => e.PartidaId == id));
-            _db.PartidaArbitros.RemoveRange(_db.PartidaArbitros.Where(a => a.PartidaId == id));
-            await _financeiro.RemoverCobrancasAsync(_db.Cobrancas.Where(c => c.PartidaId == id), desligarPartida: true);
-            _db.Partidas.Remove(partida);
+            // Exclusão lógica: a partida some para o usuário (lista, estatísticas, presença, link público
+            // e cobranças em aberto dela), mas presença, lances, escalação, juízes e cobranças continuam
+            // no banco para auditoria. O que já foi pago continua no caixa, porque o dinheiro entrou.
+            partida.DeletedAt = DateTime.UtcNow;
+            partida.DeletedByUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
             await _db.SaveChangesAsync();
 
             return Ok();

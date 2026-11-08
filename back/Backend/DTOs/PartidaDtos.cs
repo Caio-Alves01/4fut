@@ -24,7 +24,7 @@ namespace Backend.DTOs
 
     // Só o necessário para os indicadores e o campo: jogadores que aparecem na escalação ou em algum lance,
     // sem dados pessoais nem financeiros (tipo mensalista/avulso, presença, nota).
-    public record JogadorPublicoResponse(int Id, string Name, string Position, int Number);
+    public record JogadorPublicoResponse(int Id, string Name, string? Apelido, string Position, int Number);
     public record EventoPublicoResponse(int Id, string Tipo, int JogadorId, int? AssistJogadorId, int? EntraJogadorId, int Time);
 
     public record PartidaPublicaResponse(

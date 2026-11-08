@@ -24,5 +24,11 @@ namespace Backend.Models
         // Token do link público (somente leitura) com o placar, indicadores e escalação.
         // null = não compartilhada. Gerar um novo invalida o link anterior.
         public string? ShareToken { get; set; }
+
+        // Exclusão lógica: excluir só esconde do usuário. O registro (e tudo ligado a ele) continua
+        // no banco para auditoria. O filtro global do AppDbContext tira os excluídos de todas as consultas;
+        // para ver os excluídos, use IgnoreQueryFilters().
+        public DateTime? DeletedAt { get; set; }
+        public int? DeletedByUserId { get; set; }
     }
 }

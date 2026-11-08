@@ -8,8 +8,19 @@ import {
   Calendar, 
   DollarSign,
   Edit,
-  Trophy
+  Trophy,
+  Trash2
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
@@ -294,6 +305,27 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // Pelada que vai ser excluída (null = confirmação fechada). A exclusão é lógica: some daqui,
+  // mas continua no banco para auditoria.
+  const [peladaParaExcluir, setPeladaParaExcluir] = useState<Pelada | null>(null);
+  const [excluindo, setExcluindo] = useState(false);
+  const [excluirError, setExcluirError] = useState<string | null>(null);
+
+  async function handleExcluirPelada() {
+    if (!peladaParaExcluir) return;
+    setExcluindo(true);
+    setExcluirError(null);
+    try {
+      await api.delete(`/peladas/${peladaParaExcluir.id}`);
+      setPeladas((atuais) => atuais.filter((p) => p.id !== peladaParaExcluir.id));
+      setPeladaParaExcluir(null);
+    } catch (err) {
+      setExcluirError(err instanceof ApiError ? 'Não foi possível excluir a pelada.' : 'Não foi possível conectar ao servidor.');
+    } finally {
+      setExcluindo(false);
+    }
+  }
+
   useEffect(() => {
     carregarPeladas();
   }, []);
@@ -565,6 +597,15 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
+                      <Button
+                        variant="outline"
+                        className="flex items-center gap-2 border-2 text-destructive hover:bg-destructive hover:text-white hover:border-destructive transition-colors"
+                        aria-label="Excluir pelada"
+                        title="Excluir pelada"
+                        onClick={() => { setExcluirError(null); setPeladaParaExcluir(pelada); }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </CardFooter>
                   </Card>
                 ))}
@@ -747,6 +788,37 @@ export function PeladasListPage({ onNavigate }: PeladasListPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmação de exclusão da pelada */}
+      <AlertDialog
+        open={peladaParaExcluir !== null}
+        onOpenChange={(open) => { if (!open && !excluindo) setPeladaParaExcluir(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir pelada?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A pelada <strong>{peladaParaExcluir?.name}</strong> vai sumir da sua lista, junto com os jogadores,
+              as partidas e o financeiro dela. Os links públicos (partidas e financeiro) também param de funcionar.
+              Os dados ficam guardados no sistema para auditoria.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {excluirError && <p className="text-sm text-destructive">{excluirError}</p>}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindo}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              // Sem preventDefault o pop-up fecharia antes da resposta do back, escondendo um possível erro.
+              onClick={(e) => { e.preventDefault(); handleExcluirPelada(); }}
+              disabled={excluindo}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {excluindo ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

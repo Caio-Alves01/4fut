@@ -17,7 +17,10 @@ import {
   Loader2,
   ChevronLeft,
   ArrowLeftRight,
-  Scale
+  Scale,
+  Undo2,
+  ArrowDown,
+  ArrowUp,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { sortearTimes, desempenhoDoJogador, desempenhoMedioDoTime } from './sorteioTimes';
@@ -31,11 +34,21 @@ import {
   TableRow,
 } from './ui/table';
 import { posicaoNome, posicaoCorClasses } from './positions';
+import {
+  type DadosPrioridade,
+  compararPrioridade,
+  pontuacaoPrioridade,
+  grupoPrioridade,
+  descricaoPendencia,
+  ROTULO_GRUPO,
+} from './prioridadeEscalacao';
 
 // Jogador da pelada (vem de GET /peladas/{id}/jogadores).
-export interface EscalacaoJogador {
+export interface EscalacaoJogador extends DadosPrioridade {
   id: number;
   name: string;
+  /** Como é chamado na pelada; aparece no campo no lugar do nome */
+  apelido?: string | null;
   position: string;
   number: number;
   /** Nota de desempenho (0 a 10) calculada pelas partidas; equilibra o sorteio dos times */
@@ -122,6 +135,8 @@ interface EscalacaoCartolaPageProps {
     entraJogadorId?: number | null;
     time: NumeroTime;
   }) => Promise<boolean>;
+  /** Apaga um lance no back (usado para desfazer substituição). Devolve true se deu certo. */
+  onRemoverEvento: (eventoId: number) => Promise<boolean>;
 }
 
 const ITEM_TYPE = 'PLAYER';
@@ -272,8 +287,9 @@ function DraggablePlayer({ player, vagas, onEscalar }: {
                 {player.number}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{player.name}</p>
-                <p className="text-xs text-muted-foreground">{posicaoNome(player.position)}</p>
+                <p className="text-sm font-medium truncate" title={nomeCompleto(player)}>{nomeNaEscalacao(player)}</p>
+                <p className="text-xs text-muted-foreground truncate">{posicaoNome(player.position)}</p>
+                <SeloPrioridade jogador={player} />
               </div>
             </div>
             <span className="text-sm font-bold text-primary shrink-0" title="Nota de desempenho">{formatarNota(player)}</span>
@@ -281,7 +297,7 @@ function DraggablePlayer({ player, vagas, onEscalar }: {
         </div>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-2" side="top">
-        <p className="text-sm font-semibold truncate px-1">{player.name}</p>
+        <p className="text-sm font-semibold truncate px-1" title={nomeCompleto(player)}>{nomeNaEscalacao(player)}</p>
         <p className="text-xs text-muted-foreground px-1 pb-2 mb-2 border-b">Escalar em qual time?</p>
         <div className="grid grid-cols-2 gap-1.5">
           {TIMES.map((time) => (
@@ -370,7 +386,7 @@ function MenuDeLances({
             </button>
           )}
           <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">{player.name}</p>
+            <p className="text-sm font-semibold truncate" title={nomeCompleto(player)}>{nomeNaEscalacao(player)}</p>
             <p className="text-xs text-muted-foreground">
               {etapa === 'menu' && `Time ${time} · registrar lance`}
               {etapa === 'gol' && 'Gol · quem deu a assistência?'}
@@ -425,12 +441,8 @@ function MenuDeLances({
 
         {etapa === 'substituir' && (
           <div className="max-h-56 overflow-y-auto space-y-0.5">
-            {/* Quem joga na mesma posição aparece primeiro; depois, pela avaliação. */}
-            {[...reservas]
-              .sort((a, b) =>
-                Number(b.position === player.position) - Number(a.position === player.position)
-                || desempenhoDoJogador(b) - desempenhoDoJogador(a)
-                || a.name.localeCompare(b.name))
+            {/* Quem joga na mesma posição aparece primeiro; depois, pela prioridade. */}
+            {ordenarParaVaga(reservas, player.position)
               .map((r) => (
                 <button
                   key={r.id}
@@ -443,8 +455,9 @@ function MenuDeLances({
                     {r.number}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{r.name}</span>
+                    <span className="block truncate" title={nomeCompleto(r)}>{nomeNaEscalacao(r)}</span>
                     <span className="block text-[11px] text-muted-foreground">{posicaoNome(r.position)}</span>
+                    <SeloPrioridade jogador={r} />
                   </span>
                   <span className="text-xs font-bold text-primary" title="Nota de desempenho">{formatarNota(r)}</span>
                 </button>
@@ -483,7 +496,7 @@ function MenuDeLances({
                 <span className={`w-6 h-6 shrink-0 rounded-full ${getPositionColor(c.position)} text-white text-[10px] font-bold flex items-center justify-center`}>
                   {c.number}
                 </span>
-                <span className="truncate">{c.name}</span>
+                <span className="truncate" title={nomeCompleto(c)}>{nomeNaEscalacao(c)}</span>
               </button>
             ))}
             {companheiros.length === 0 && (
@@ -510,10 +523,7 @@ function EscolherJogador({ vaga, reservas, onEscolher, children }: {
   children: ReactNode;
 }) {
   const [aberto, setAberto] = useState(false);
-  const ordenados = [...reservas].sort((a, b) =>
-    Number(b.position === vaga) - Number(a.position === vaga)
-    || desempenhoDoJogador(b) - desempenhoDoJogador(a)
-    || a.name.localeCompare(b.name));
+  const ordenados = ordenarParaVaga(reservas, vaga);
 
   return (
     <Popover open={aberto} onOpenChange={setAberto}>
@@ -533,8 +543,9 @@ function EscolherJogador({ vaga, reservas, onEscolher, children }: {
                 {r.number}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate">{r.name}</span>
+                <span className="block truncate" title={nomeCompleto(r)}>{nomeNaEscalacao(r)}</span>
                 <span className="block text-[11px] text-muted-foreground">{posicaoNome(r.position)}</span>
+                <SeloPrioridade jogador={r} />
               </span>
               <span className="text-xs font-bold text-primary">{formatarNota(r)}</span>
             </button>
@@ -627,7 +638,7 @@ function FieldPosition({
           {expulso ? (
             <div
               className={`${circulo} rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg opacity-50 grayscale ring-2 ring-red-600`}
-              title={`${player.name} · expulso, não pode ter mais lances`}
+              title={`${nomeCompleto(player)} · expulso, não pode ter mais lances`}
             >
               {player.number}
             </div>
@@ -644,7 +655,7 @@ function FieldPosition({
               <button
                 type="button"
                 className={`${circulo} rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg cursor-pointer hover:scale-105 hover:ring-2 hover:ring-white transition-transform`}
-                title={`${player.name} · toque para registrar gol, assistência, cartão ou substituir`}
+                title={`${nomeCompleto(player)} · toque para registrar gol, assistência, cartão ou substituir`}
               >
                 {player.number}
               </button>
@@ -666,8 +677,8 @@ function FieldPosition({
 
         <div className={`bg-white/95 backdrop-blur-sm rounded-md shadow-lg py-0.5 ${rotulo} flex items-center gap-1`}>
           <span className="text-[10px] font-bold text-primary" title="Nota de desempenho">{formatarNota(player)}</span>
-          <p className={`${compacto ? 'text-[10px]' : 'text-[11px]'} font-medium truncate text-gray-900`} title={player.name}>
-            {compacto ? nomeCurto(player.name) : player.name}
+          <p className={`${compacto ? 'text-[10px]' : 'text-[11px]'} font-medium truncate text-gray-900`} title={nomeCompleto(player)}>
+            {nomeNaEscalacao(player, compacto)}
           </p>
         </div>
         <SelosDaPosicao expulso={expulso} improvisado={improvisado} player={player} position={position} />
@@ -680,6 +691,50 @@ function FieldPosition({
 function nomeCurto(nome: string): string {
   const partes = nome.trim().split(/\s+/);
   return partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1][0]}.` : partes[0];
+}
+
+// Nome que aparece na escalação: o apelido, quando tem; senão o nome (encurtado no campo pequeno).
+export function nomeNaEscalacao(j: { name: string; apelido?: string | null }, compacto = false): string {
+  if (j.apelido) return j.apelido;
+  return compacto ? nomeCurto(j.name) : j.name;
+}
+
+// Dica ao passar o mouse: "Caiozinho (Caio Almeida Alves)".
+function nomeCompleto(j: { name: string; apelido?: string | null }): string {
+  return j.apelido ? `${j.apelido} (${j.name})` : j.name;
+}
+
+// Em listas: reservas na mesma posição primeiro, depois por prioridade, depois por nome.
+function ordenarParaVaga(lista: EscalacaoJogador[], posicao: string): EscalacaoJogador[] {
+  return [...lista].sort((a, b) =>
+    Number(b.position === posicao) - Number(a.position === posicao)
+    || compararPrioridade(a, b)
+    || desempenhoDoJogador(b) - desempenhoDoJogador(a)
+    || nomeNaEscalacao(a).localeCompare(nomeNaEscalacao(b)));
+}
+
+// Selo da prioridade (Em dia / Avulso / Pendente) e presença, usado nas listas de disponíveis.
+function SeloPrioridade({ jogador }: { jogador: EscalacaoJogador }) {
+  // Na página pública não vêm os dados de prioridade: não mostra nada.
+  if (jogador.tipo === undefined) return null;
+  const grupo = grupoPrioridade(jogador);
+  const rotulo = ROTULO_GRUPO[grupo];
+  const pendencia = descricaoPendencia(jogador);
+  return (
+    <span className="flex items-center gap-1 flex-wrap">
+      <span
+        className={`inline-flex items-center rounded border px-1 text-[10px] font-semibold leading-4 ${rotulo.classes}`}
+        title={pendencia ?? rotulo.explicacao}
+      >
+        {rotulo.curto}
+      </span>
+      {jogador.presencaPercentual != null && (
+        <span className="text-[10px] text-muted-foreground" title="Presença nas partidas da pelada">
+          {jogador.presencaPercentual}% pres.
+        </span>
+      )}
+    </span>
+  );
 }
 
 // Gols, assistências, cartões e o selo de quem entrou na partida, em volta do círculo do jogador no campo.
@@ -768,7 +823,7 @@ function statsDoTime(eventos: EscalacaoEvento[], time: NumeroTime) {
   return { porJogador, total };
 }
 
-export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSalvarEscalacao, onRegistrarEvento }: EscalacaoCartolaPageProps) {
+export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSalvarEscalacao, onRegistrarEvento, onRemoverEvento }: EscalacaoCartolaPageProps) {
   const [view, setView] = useState<'campo' | 'lista'>('campo');
   // Versão mini (celular): mostra um time por vez.
   const [timeMini, setTimeMini] = useState<NumeroTime>(1);
@@ -846,7 +901,10 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
 
   const titulares: Record<NumeroTime, EscalacaoJogador[]> = { 1: titularesDoTime(1), 2: titularesDoTime(2) };
   const idsEscalados = new Set([...titulares[1], ...titulares[2]].map((j) => j.id));
-  const reservas = disponiveisParaJogar.filter((j) => !idsEscalados.has(j.id) && !expulsos.has(j.id));
+  // Disponíveis em ordem de prioridade (ver prioridadeEscalacao.ts): quem deve entrar primeiro fica no topo.
+  const reservas = disponiveisParaJogar
+    .filter((j) => !idsEscalados.has(j.id) && !expulsos.has(j.id))
+    .sort((a, b) => compararPrioridade(a, b) || nomeNaEscalacao(a).localeCompare(nomeNaEscalacao(b)));
 
   // Um jogador só pode estar em um dos dois times.
   const handleDrop = (time: NumeroTime, index: number, playerId: number) => {
@@ -881,6 +939,113 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     });
   };
 
+  // ---------- Substituídos ----------
+  // Quem saiu não volta para o jogo (some dos disponíveis). Para não "perder" ninguém, a lista de
+  // substituídos mostra cada troca e permite desfazer uma substituição feita por engano.
+  const todosPorId = new Map(jogadores.map((j) => [j.id, j]));
+  const substituicoes = eventos.filter((e) => e.tipo === 'substituicao');
+  const [desfazendo, setDesfazendo] = useState<number | null>(null);
+  const [confirmarDesfazer, setConfirmarDesfazer] = useState<number | null>(null);
+
+  async function desfazerSubstituicao(ev: EscalacaoEvento) {
+    setDesfazendo(ev.id);
+    const ok = await onRemoverEvento(ev.id);
+    setDesfazendo(null);
+    setConfirmarDesfazer(null);
+    if (!ok) return;
+    // Quem entrou sai do campo e quem tinha saído volta para a mesma posição.
+    // Se quem entrou não estiver mais no campo, quem saiu volta para os disponíveis.
+    const entrou = ev.entraJogadorId;
+    if (entrou === null) return;
+    setEscalados((atual) => {
+      const doTime = [...atual[ev.time]];
+      const i = doTime.indexOf(entrou);
+      if (i < 0) return atual;
+      doTime[i] = ev.jogadorId;
+      return { ...atual, [ev.time]: doTime };
+    });
+  }
+
+  function cardSubstituidos(versao: 'normal' | 'media' | 'mini') {
+    if (substituicoes.length === 0) return null;
+    const nome = (id: number | null) => {
+      const j = id === null ? undefined : todosPorId.get(id);
+      return j ? nomeNaEscalacao(j) : 'Jogador removido';
+    };
+    const numero = (id: number | null) => (id === null ? undefined : todosPorId.get(id))?.number ?? '?';
+
+    return (
+      <Card className="gap-3">
+        <CardHeader className={versao === 'mini' ? 'px-3 pt-4' : undefined}>
+          <CardTitle className="flex items-center gap-2">
+            <ArrowLeftRight className="h-5 w-5" />
+            Substituídos ({substituicoes.length})
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Quem foi substituído não volta para o jogo. Se uma troca foi feita por engano, use Desfazer:
+            quem saiu volta para a posição e quem entrou volta para os disponíveis.
+          </p>
+        </CardHeader>
+        <CardContent className={`space-y-2 ${versao === 'mini' ? 'px-3 pb-4' : ''}`}>
+          {substituicoes.map((ev) => {
+            // Se quem entrou também já foi substituído, é preciso desfazer essa troca antes.
+            const entrouJaSaiu = ev.entraJogadorId !== null && sairam.has(ev.entraJogadorId);
+            const confirmando = confirmarDesfazer === ev.id;
+            return (
+              <div key={ev.id} className="rounded-lg border bg-card p-2 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="outline" className={ev.time === 1 ? 'border-green-300 text-green-700' : 'border-blue-300 text-blue-700'}>
+                    Time {ev.time}
+                  </Badge>
+                  {confirmando ? (
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={desfazendo === ev.id} onClick={() => setConfirmarDesfazer(null)}>
+                        Cancelar
+                      </Button>
+                      <Button size="sm" variant="destructive" className="h-7 px-2 text-xs" disabled={desfazendo === ev.id} onClick={() => desfazerSubstituicao(ev)}>
+                        {desfazendo === ev.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Confirmar'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs gap-1"
+                      disabled={entrouJaSaiu || desfazendo !== null}
+                      title={entrouJaSaiu ? `Desfaça antes a substituição de ${nome(ev.entraJogadorId)}` : 'Desfazer esta substituição'}
+                      onClick={() => setConfirmarDesfazer(ev.id)}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" /> Desfazer
+                    </Button>
+                  )}
+                </div>
+                <p className="flex items-center gap-1.5 text-sm min-w-0">
+                  <ArrowDown className="h-4 w-4 shrink-0 text-red-600" aria-label="Saiu" />
+                  <span className="text-xs text-muted-foreground w-10 shrink-0">Saiu</span>
+                  <span className="font-medium truncate" title={todosPorId.get(ev.jogadorId) ? nomeCompleto(todosPorId.get(ev.jogadorId)!) : undefined}>
+                    {numero(ev.jogadorId)} · {nome(ev.jogadorId)}
+                  </span>
+                </p>
+                <p className="flex items-center gap-1.5 text-sm min-w-0">
+                  <ArrowUp className="h-4 w-4 shrink-0 text-green-600" aria-label="Entrou" />
+                  <span className="text-xs text-muted-foreground w-10 shrink-0">Entrou</span>
+                  <span className="font-medium truncate">
+                    {numero(ev.entraJogadorId)} · {nome(ev.entraJogadorId)}
+                  </span>
+                </p>
+                {entrouJaSaiu && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {nome(ev.entraJogadorId)} também já foi substituído: desfaça essa troca primeiro.
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    );
+  }
+
   const handleRemove = (time: NumeroTime, index: number) => {
     setEscalados((atual) => {
       const doTime = [...atual[time]];
@@ -893,7 +1058,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
   // (ver sorteioTimes.ts).
   const shufflePlayers = () => {
     const vagas = (time: NumeroTime) => FORMACOES[esquemas[time]].map((slot) => slot.position);
-    const participantes = disponiveisParaJogar.filter((j) => !expulsos.has(j.id)).map((j) => ({ id: j.id, position: j.position, desempenho: desempenhoDoJogador(j) }));
+    const participantes = disponiveisParaJogar.filter((j) => !expulsos.has(j.id)).map((j) => ({ id: j.id, position: j.position, desempenho: desempenhoDoJogador(j), prioridade: pontuacaoPrioridade(j) }));
     const { time1, time2 } = sortearTimes(participantes, vagas(1), vagas(2));
     setEscalados({ 1: time1, 2: time2 });
   };
@@ -925,7 +1090,10 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                   {player.number}
                 </div>
               </TableCell>
-              <TableCell className="font-medium">{player.name}</TableCell>
+              <TableCell className="font-medium">
+                {nomeNaEscalacao(player)}
+                {player.apelido && <span className="block text-xs text-muted-foreground font-normal">{player.name}</span>}
+              </TableCell>
               <TableCell>
                 <Badge variant="secondary" className={posicaoCorClasses(player.position)}>
                   {posicaoNome(player.position)}
@@ -1064,16 +1232,22 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
     );
 
     return (
-      <Card className={versao === 'normal' ? 'h-full' : 'gap-3'}>
+      <Card className="gap-3">
         <CardHeader className={versao === 'mini' ? 'px-3 pt-4' : undefined}>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             Disponíveis ({reservas.length})
           </CardTitle>
+          {reservas.length > 1 && (
+            <p className="text-xs text-muted-foreground">
+              Em ordem de prioridade: mensalistas em dia, avulsos e, por último, quem tem pagamento em aberto.
+              No mesmo grupo, quem tem mais presença vem antes. O sorteio segue essa ordem quando sobra gente.
+            </p>
+          )}
         </CardHeader>
         <CardContent className={versao === 'mini' ? 'px-3 pb-4' : undefined}>
           {versao === 'normal' && (
-            <ScrollArea className="h-[600px] pr-4">
+            <ScrollArea className={`${substituicoes.length > 0 ? 'h-[380px]' : 'h-[600px]'} pr-4`}>
               <div className="space-y-2">{itens}{vazio}</div>
             </ScrollArea>
           )}
@@ -1203,7 +1377,10 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
           <div className="versao-normal">
             <div className="grid grid-cols-[1fr_1fr_260px] gap-4">
               {TIMES.map((time) => campoDoTime(time))}
-              {cardDisponiveis('normal')}
+              <div className="space-y-4">
+                {cardDisponiveis('normal')}
+                {cardSubstituidos('normal')}
+              </div>
             </div>
           </div>
 
@@ -1214,6 +1391,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
                 {TIMES.map((time) => campoDoTime(time, true))}
               </div>
               {cardDisponiveis('media')}
+              {cardSubstituidos('media')}
             </div>
           </div>
 
@@ -1237,6 +1415,7 @@ export function EscalacaoCartolaPage({ jogadores, eventos, escalacaoSalva, onSal
               </div>
               {campoDoTime(timeMini, true)}
               {cardDisponiveis('mini')}
+              {cardSubstituidos('mini')}
             </div>
           </div>
 
@@ -1276,6 +1455,7 @@ function Gramado({ children, compacto = false }: { children: ReactNode; compacto
 export interface JogadorSomenteLeitura {
   id: number;
   name: string;
+  apelido?: string | null;
   position: string;
   number: number;
 }
@@ -1340,14 +1520,14 @@ export function EscalacaoSomenteLeitura({ escalacao, eventos, jogadores }: {
                         <div className="relative">
                           <div
                             className={`w-9 h-9 text-sm sm:w-12 sm:h-12 sm:text-base rounded-full ${getPositionColor(player.position)} flex items-center justify-center text-white font-bold shadow-lg ${expulso ? 'opacity-50 grayscale ring-2 ring-red-600' : ''}`}
-                            title={`${player.name} · ${posicaoNome(player.position)}`}
+                            title={`${nomeCompleto(player)} · ${posicaoNome(player.position)}`}
                           >
                             {player.number}
                           </div>
                           <MarcacoesDoJogador stats={porJogador.get(player.id) ?? SEM_STATS} entrouNaPartida={entraram.has(player.id)} />
                         </div>
                         <div className="bg-white/95 backdrop-blur-sm rounded-md shadow-lg px-1 sm:px-1.5 py-0.5 max-w-[68px] sm:max-w-[96px]">
-                          <p className="text-[11px] font-medium truncate text-gray-900" title={player.name}>{player.name}</p>
+                          <p className="text-[11px] font-medium truncate text-gray-900" title={nomeCompleto(player)}>{nomeNaEscalacao(player, true)}</p>
                         </div>
                         <SelosDaPosicao
                           expulso={expulso}

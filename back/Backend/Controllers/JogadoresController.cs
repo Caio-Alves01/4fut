@@ -35,8 +35,10 @@ namespace Backend.Controllers
                 .Where(j => j.PeladaId == peladaId)
                 .ToListAsync();
 
+            var pelada = (await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == peladaId))!;
             var estatisticas = await _estatisticas.CalcularAsync(peladaId, jogadores);
-            var resposta = jogadores.Select(j => ParaResponse(j, estatisticas[j.Id])).ToList();
+            var prioridades = await _estatisticas.CalcularPrioridadeAsync(pelada, jogadores);
+            var resposta = jogadores.Select(j => ParaResponse(j, estatisticas[j.Id], prioridades[j.Id])).ToList();
             return Ok(resposta);
         }
 
@@ -51,7 +53,8 @@ namespace Backend.Controllers
             var tipo = Normalizar(request.Tipo);
             // Status é opcional no cadastro: sem ele, o jogador entra como ativo.
             var status = Normalizar(request.Status) ?? StatusJogador.Ativo;
-            var erro = ValidarDadosCadastrais(request.Name, request.BirthDate, request.Number, tipo, status);
+            var apelido = LimparApelido(request.Apelido);
+            var erro = ValidarDadosCadastrais(request.Name, request.BirthDate, request.Number, tipo, status, apelido);
             if (erro is not null)
                 return BadRequest(erro);
 
@@ -59,6 +62,7 @@ namespace Backend.Controllers
             {
                 PeladaId = peladaId,
                 Name = request.Name.Trim(),
+                Apelido = apelido,
                 BirthDate = request.BirthDate,
                 Age = Idade.Calcular(request.BirthDate!.Value),
                 Position = request.Position,
@@ -93,11 +97,14 @@ namespace Backend.Controllers
 
             var tipo = Normalizar(request.Tipo);
             var status = Normalizar(request.Status) ?? jogador.Status;
-            var erro = ValidarDadosCadastrais(request.Name, request.BirthDate, request.Number, tipo, status);
+            var apelido = LimparApelido(request.Apelido);
+            var erro = ValidarDadosCadastrais(request.Name, request.BirthDate, request.Number, tipo, status, apelido);
             if (erro is not null)
                 return BadRequest(erro);
 
             jogador.Name = request.Name.Trim();
+            // Apelido vazio (ou não enviado) apaga o apelido: o formulário sempre manda o valor atual.
+            jogador.Apelido = apelido;
             jogador.BirthDate = request.BirthDate;
             jogador.Age = Idade.Calcular(request.BirthDate!.Value);
             jogador.Position = request.Position;
@@ -139,14 +146,21 @@ namespace Backend.Controllers
             return Ok();
         }
 
+        // "  Caiozinho  " -> "Caiozinho"; vazio vira null (sem apelido).
+        private static string? LimparApelido(string? apelido) =>
+            string.IsNullOrWhiteSpace(apelido) ? null : apelido.Trim();
+
         // " Avulso " -> "avulso", para a comparação com as whitelists não depender de maiúsculas/espaços.
         private static string? Normalizar(string? valor) => valor?.Trim().ToLowerInvariant();
 
         // Regras do cadastro/edição de jogador. Devolve a mensagem de erro, ou null se estiver tudo certo.
-        private static string? ValidarDadosCadastrais(string? nome, DateOnly? dataNascimento, int numero, string? tipo, string status)
+        private static string? ValidarDadosCadastrais(string? nome, DateOnly? dataNascimento, int numero, string? tipo, string status, string? apelido)
         {
             if (string.IsNullOrWhiteSpace(nome))
                 return "O nome do jogador é obrigatório.";
+
+            if (apelido is not null && apelido.Length > Jogador.ApelidoMaximo)
+                return $"O apelido pode ter no máximo {Jogador.ApelidoMaximo} caracteres.";
 
             if (dataNascimento is null)
                 return "A data de nascimento é obrigatória.";
@@ -172,22 +186,25 @@ namespace Backend.Controllers
         // Confere se a pelada existe e se é o usuário logado quem criou ela.
         private async Task<bool> PeladaPertenceAoUsuario(int peladaId, int userId)
         {
-            var pelada = await _db.Peladas.FindAsync(peladaId);
+            var pelada = await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == peladaId);
             return pelada is not null && pelada.OwnerUserId == userId;
         }
 
         private async Task<JogadorResponse> ParaResponseComEstatisticas(int peladaId, Jogador jogador)
         {
+            var pelada = (await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == peladaId))!;
             var estatisticas = await _estatisticas.CalcularAsync(peladaId, new[] { jogador });
-            return ParaResponse(jogador, estatisticas[jogador.Id]);
+            var prioridades = await _estatisticas.CalcularPrioridadeAsync(pelada, new[] { jogador });
+            return ParaResponse(jogador, estatisticas[jogador.Id], prioridades[jogador.Id]);
         }
 
         // Gols, cartões e jogos vêm das partidas (ver EstatisticasService), não só dos campos do Jogador.
-        private static JogadorResponse ParaResponse(Jogador jogador, EstatisticasJogador estatisticas)
+        private static JogadorResponse ParaResponse(Jogador jogador, EstatisticasJogador estatisticas, PrioridadeJogador prioridade)
         {
             return new JogadorResponse(
                 jogador.Id,
                 jogador.Name,
+                jogador.Apelido,
                 // Com data de nascimento a idade é sempre a atual; sem ela (jogador antigo), usa a que foi digitada.
                 jogador.BirthDate is not null ? Idade.Calcular(jogador.BirthDate.Value) : jogador.Age,
                 jogador.BirthDate,
@@ -201,7 +218,11 @@ namespace Backend.Controllers
                 estatisticas.CartoesAmarelos,
                 estatisticas.CartoesVermelhos,
                 estatisticas.Jogos,
-                estatisticas.Nota);
+                estatisticas.Nota,
+                prioridade.PresencaPercentual,
+                prioridade.MensalidadeEmDia,
+                prioridade.MensalidadesEmAberto,
+                prioridade.OutrasPendencias);
         }
     }
 }

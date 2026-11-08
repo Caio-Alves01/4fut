@@ -6,6 +6,11 @@ namespace Backend.Models
         public int PeladaId { get; set; }
 
         public string Name { get; set; } = string.Empty;
+
+        // Como o jogador é chamado na pelada (ex: "Caio Almeida Alves" -> "Caiozinho").
+        // Opcional; quando existe, é o que aparece no campo da escalação.
+        public string? Apelido { get; set; }
+        public const int ApelidoMaximo = 30;
         public int Age { get; set; }
 
         // A idade passa a vir daqui (ver Idade.Calcular). Age continua só para jogadores cadastrados

@@ -42,6 +42,14 @@ namespace Backend.Data
             modelBuilder.Entity<Jogador>()
                 .HasIndex(j => j.PeladaId);
 
+            // Exclusão lógica: pelada/partida excluída some de todas as consultas, mas fica no banco.
+            modelBuilder.Entity<Pelada>().HasQueryFilter(p => p.DeletedAt == null);
+            modelBuilder.Entity<Partida>().HasQueryFilter(p => p.DeletedAt == null);
+
+            modelBuilder.Entity<Jogador>()
+                .Property(j => j.Apelido)
+                .HasMaxLength(Jogador.ApelidoMaximo);
+
             // Jogadores que já existiam antes do campo Tipo entram como mensalistas.
             modelBuilder.Entity<Jogador>()
                 .Property(j => j.Tipo)

@@ -77,7 +77,10 @@ namespace Backend.Controllers
             if (partida is null)
                 return NotFound();
 
-            var pelada = await _db.Peladas.FindAsync(partida.PeladaId);
+            // Pelada excluída (exclusão lógica): o link das partidas dela também para de funcionar.
+            var pelada = await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == partida.PeladaId);
+            if (pelada is null)
+                return NotFound();
             var escalados = await _db.PartidaEscalados.Where(e => e.PartidaId == partida.Id).ToListAsync();
             var eventos = await _db.PartidaEventos.Where(e => e.PartidaId == partida.Id).OrderBy(e => e.Id).ToListAsync();
 
@@ -90,11 +93,11 @@ namespace Backend.Controllers
                 .ToList();
             var jogadores = await _db.Jogadores
                 .Where(j => j.PeladaId == partida.PeladaId && ids.Contains(j.Id))
-                .Select(j => new JogadorPublicoResponse(j.Id, j.Name, j.Position, j.Number))
+                .Select(j => new JogadorPublicoResponse(j.Id, j.Name, j.Apelido, j.Position, j.Number))
                 .ToListAsync();
 
             return Ok(new PartidaPublicaResponse(
-                pelada?.Name ?? "",
+                pelada.Name,
                 PartidasController.ParaResponse(partida),
                 PartidasController.ParaEscalacao(partida, escalados),
                 eventos.Select(e => new EventoPublicoResponse(e.Id, e.Tipo, e.JogadorId, e.AssistJogadorId, e.EntraJogadorId, e.Time)).ToList(),

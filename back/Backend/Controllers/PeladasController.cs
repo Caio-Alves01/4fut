@@ -264,6 +264,24 @@ namespace Backend.Controllers
             return atividades.OrderByDescending(a => a.Data).Take(MaxAtividades).ToList();
         }
 
+        // Exclusão lógica: a pelada some da lista do usuário (e os links públicos dela param de funcionar),
+        // mas ela e tudo dela (jogadores, partidas, finanças) continuam no banco para auditoria.
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeletePelada(int id)
+        {
+            var userId = GetUserId();
+            var pelada = await _db.Peladas.SingleOrDefaultAsync(p => p.Id == id && p.OwnerUserId == userId);
+
+            if (pelada is null)
+                return NotFound();
+
+            pelada.DeletedAt = DateTime.UtcNow;
+            pelada.DeletedByUserId = userId;
+            await _db.SaveChangesAsync();
+
+            return Ok();
+        }
+
         [HttpPut("{id}")]
         public async Task<ActionResult<PeladaResponse>> UpdatePelada(int id, UpdatePeladaRequest request)
         {

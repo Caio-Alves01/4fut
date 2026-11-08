@@ -82,6 +82,10 @@ namespace Backend.Migrations
                     b.Property<int>("Age")
                         .HasColumnType("int");
 
+                    b.Property<string>("Apelido")
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
                     b.Property<int>("Assistencias")
                         .HasColumnType("int");
 
@@ -195,6 +199,12 @@ namespace Backend.Migrations
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<string>("EsquemaTime1")
                         .IsRequired()
@@ -389,6 +399,12 @@ namespace Backend.Migrations
                     b.Property<string>("DaysOfWeek")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
                         .IsRequired()

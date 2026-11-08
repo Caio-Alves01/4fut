@@ -27,5 +27,11 @@ namespace Backend.Models
         // Token do link público (somente leitura) do dashboard financeiro. null = não compartilhado.
         // Gerar um novo invalida o link anterior.
         public string? FinanceiroShareToken { get; set; }
+
+        // Exclusão lógica: excluir só esconde do usuário. O registro (e tudo ligado a ele) continua
+        // no banco para auditoria. O filtro global do AppDbContext tira os excluídos de todas as consultas;
+        // para ver os excluídos, use IgnoreQueryFilters().
+        public DateTime? DeletedAt { get; set; }
+        public int? DeletedByUserId { get; set; }
     }
 }

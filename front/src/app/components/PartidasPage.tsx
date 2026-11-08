@@ -237,6 +237,32 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
   const [editError, setEditError] = useState<string | null>(null);
 
   const [matches, setMatches] = useState<Match[]>([]);
+
+  // Partida que vai ser excluída (null = confirmação fechada). Exclusão lógica: some da lista,
+  // das estatísticas e do link público, mas continua no banco para auditoria.
+  const [partidaParaExcluir, setPartidaParaExcluir] = useState<Match | null>(null);
+  const [excluindoPartida, setExcluindoPartida] = useState(false);
+  const [erroExcluirPartida, setErroExcluirPartida] = useState<string | null>(null);
+
+  async function handleExcluirPartida() {
+    if (!partidaParaExcluir) return;
+    setExcluindoPartida(true);
+    setErroExcluirPartida(null);
+    try {
+      await api.delete(`/peladas/${peladaId}/partidas/${partidaParaExcluir.id}`);
+      setMatches((atuais) => atuais.filter((m) => m.id !== partidaParaExcluir.id));
+      setPartidaParaExcluir(null);
+    } catch (err) {
+      setErroExcluirPartida(mensagemDeErro(err, 'Não foi possível excluir a partida.'));
+    } finally {
+      setExcluindoPartida(false);
+    }
+  }
+
+  function pedirExclusaoPartida(match: Match) {
+    setErroExcluirPartida(null);
+    setPartidaParaExcluir(match);
+  }
   const [jogadores, setJogadores] = useState<JogadorDaPelada[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -491,6 +517,21 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
       return true;
     } catch (err) {
       setDetalhesError(mensagemDeErro(err, 'Não foi possível salvar os juízes da partida.'));
+      return false;
+    }
+  }
+
+  // Usado pela escalação para desfazer uma substituição. Devolve true se deu certo.
+  async function removerEventoDaEscalacao(eventoId: number): Promise<boolean> {
+    if (!selectedMatch) return false;
+
+    setDetalhesError(null);
+    try {
+      await api.delete(`/peladas/${peladaId}/partidas/${selectedMatch.id}/eventos/${eventoId}`);
+      await carregarDetalhes(selectedMatch.id);
+      return true;
+    } catch (err) {
+      setDetalhesError(mensagemDeErro(err, 'Não foi possível desfazer a substituição.'));
       return false;
     }
   }
@@ -841,6 +882,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                   escalacaoSalva={detalhes.escalacao}
                   onSalvarEscalacao={salvarEscalacao}
                   onRegistrarEvento={registrarEvento}
+                  onRemoverEvento={removerEventoDaEscalacao}
                 />
               </DndProvider>
             ) : (
@@ -1137,6 +1179,15 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
+                    <Button
+                      variant="outline"
+                      className="border-2 text-destructive hover:bg-destructive hover:text-white hover:border-destructive transition-colors"
+                      aria-label="Excluir partida"
+                      title="Excluir partida"
+                      onClick={() => pedirExclusaoPartida(match)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1153,9 +1204,9 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
             {pastMatches.map((match) => (
               <Card key={match.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-4 flex-1">
-                      <div className="text-center min-w-24">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-4 flex-1 flex-wrap min-w-0">
+                      <div className="text-center min-w-20">
                         <p className="text-sm text-muted-foreground">
                           {new Date(match.date).toLocaleDateString('pt-BR')}
                         </p>
@@ -1176,7 +1227,7 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                         </div>
                       </div>
 
-                      <div className="text-right min-w-32">
+                      <div className="text-right min-w-0 max-sm:basis-full max-sm:text-left">
                         <div className="flex items-center gap-2 text-muted-foreground text-sm">
                           <MapPin className="h-4 w-4" />
                           <span>{match.location}</span>
@@ -1193,6 +1244,16 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
                       >
                         <Eye className="h-4 w-4 mr-2" />
                         Ver Detalhes
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-2 text-destructive hover:bg-destructive hover:text-white hover:border-destructive transition-colors"
+                        aria-label="Excluir partida"
+                        title="Excluir partida"
+                        onClick={() => pedirExclusaoPartida(match)}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -1270,6 +1331,40 @@ export function PartidasPage({ peladaId, onNavigate }: PartidasPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmação de exclusão da partida */}
+      <AlertDialog
+        open={partidaParaExcluir !== null}
+        onOpenChange={(open) => { if (!open && !excluindoPartida) setPartidaParaExcluir(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir partida?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A partida de{' '}
+              <strong>
+                {partidaParaExcluir && new Date(partidaParaExcluir.date).toLocaleDateString('pt-BR')} às {partidaParaExcluir?.time}
+              </strong>{' '}
+              vai sumir da lista e deixa de contar nas estatísticas, na presença e nas cobranças em aberto.
+              O link público dela também para de funcionar. O que já foi pago continua no caixa, e os dados
+              ficam guardados no sistema para auditoria.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {erroExcluirPartida && <p className="text-sm text-destructive">{erroExcluirPartida}</p>}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindoPartida}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleExcluirPartida(); }}
+              disabled={excluindoPartida}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {excluindoPartida ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

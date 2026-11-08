@@ -81,6 +81,8 @@ function statusInfo(status: StatusJogador) {
 interface Player {
   id: number;
   name: string;
+  /** Como é chamado na pelada; aparece no campo da escalação no lugar do nome */
+  apelido: string | null;
   age: number;
   /** "yyyy-MM-dd"; null em jogadores cadastrados antes da data de nascimento existir */
   birthDate: string | null;
@@ -110,6 +112,7 @@ interface JogadoresPageProps {
 interface JogadorApi {
   id: number;
   name: string;
+  apelido: string | null;
   age: number;
   birthDate: string | null;
   position: string;
@@ -128,6 +131,7 @@ function jogadorApiParaPlayer(jogador: JogadorApi): Player {
   return {
     id: jogador.id,
     name: jogador.name,
+    apelido: jogador.apelido ?? null,
     age: jogador.age,
     birthDate: jogador.birthDate,
     position: jogador.position,
@@ -154,6 +158,7 @@ function calculatePlayerRating(player: Player): number {
 
 interface PlayerForm {
   name: string;
+  apelido: string;
   birthDate: string;
   position: string;
   number: string;
@@ -161,9 +166,11 @@ interface PlayerForm {
   status: StatusJogador;
 }
 
-const emptyPlayerForm: PlayerForm = { name: '', birthDate: '', position: '', number: '', tipo: '', status: 'ativo' };
+const emptyPlayerForm: PlayerForm = { name: '', apelido: '', birthDate: '', position: '', number: '', tipo: '', status: 'ativo' };
 
 const IDADE_MINIMA = 18;
+// Mesmo limite do back (Models/Jogador.ApelidoMaximo).
+const APELIDO_MAXIMO = 30;
 
 // Mesma conta do back (Services/Idade.cs): anos completos até hoje.
 function calcularIdade(birthDate: string): number {
@@ -212,6 +219,20 @@ function PlayerFields({ idPrefix, form, onChange }: PlayerFieldsProps) {
           value={form.name}
           onChange={(e) => onChange({ ...form, name: e.target.value })}
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}Apelido`}>
+          Apelido <span className="text-muted-foreground font-normal">(opcional)</span>
+        </Label>
+        <Input
+          id={`${idPrefix}Apelido`}
+          placeholder="Ex: Joãozinho"
+          maxLength={APELIDO_MAXIMO}
+          value={form.apelido}
+          onChange={(e) => onChange({ ...form, apelido: e.target.value })}
+        />
+        <p className="text-xs text-muted-foreground">É o nome que aparece no campo da escalação.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -351,6 +372,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
 
   const filteredPlayers = players.filter(player =>
     player.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (player.apelido ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     posicaoNome(player.position).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -359,6 +381,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
     try {
       const jogadorCriado = await api.post<JogadorApi>(`/peladas/${peladaId}/jogadores`, {
         name: newPlayer.name,
+        apelido: newPlayer.apelido.trim() || null,
         birthDate: newPlayer.birthDate,
         position: newPlayer.position,
         number: parseInt(newPlayer.number),
@@ -379,6 +402,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
     setEditError(null);
     setEditForm({
       name: player.name,
+      apelido: player.apelido ?? '',
       // Jogador antigo sem data de nascimento: o campo vem vazio e precisa ser preenchido para salvar.
       birthDate: player.birthDate ?? '',
       position: player.position,
@@ -397,6 +421,7 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
       // Só manda os dados cadastrais e o status: papel e estatísticas são mantidos pelo back.
       const jogadorAtualizado = await api.put<JogadorApi>(`/peladas/${peladaId}/jogadores/${editingPlayer.id}`, {
         name: editForm.name,
+        apelido: editForm.apelido.trim() || null,
         birthDate: editForm.birthDate,
         position: editForm.position,
         number: parseInt(editForm.number),
@@ -605,7 +630,10 @@ export function JogadoresPage({ peladaId, onNavigate }: JogadoresPageProps) {
               <CardContent className="p-4 space-y-3">
                 {/* Name and Position */}
                 <div className="text-center">
-                  <h3 className="font-bold truncate">{player.name}</h3>
+                  <h3 className="font-bold truncate">{player.apelido ?? player.name}</h3>
+                  {player.apelido && (
+                    <p className="text-xs text-muted-foreground truncate">{player.name}</p>
+                  )}
                   <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
                     <Badge variant="secondary" className={posicaoCorClasses(player.position)}>
                       {posicaoNome(player.position)}

@@ -1,7 +1,8 @@
 // Sorteio de dois times equilibrados, com cada jogador na posição dele.
 //
-// 1. Se houver mais jogadores que vagas, sorteia quem fica de fora (goleiros têm prioridade
-//    para as vagas de goleiro).
+// 1. Se houver mais jogadores que vagas, entra quem tem mais prioridade (mensalista em dia,
+//    depois avulso, depois quem tem pendência; dentro do grupo, quem tem mais presença; ver
+//    prioridadeEscalacao.ts). Empate é sorteado. Goleiros têm preferência nas vagas de goleiro.
 // 2. Encaixa os jogadores nas vagas dos dois esquemas ao mesmo tempo, sempre pela vaga que mais
 //    combina com a posição de cada um (posição exata > parecida > improvisado), mantendo os
 //    dois times com a mesma quantidade de jogadores.
@@ -16,6 +17,8 @@ export interface JogadorSorteio {
   position: string;
   /** Nota de desempenho (0 a 10) usada para equilibrar; ver desempenhoDoJogador */
   desempenho: number;
+  /** Quem tem mais entra primeiro quando sobram jogadores (ver pontuacaoPrioridade). Sem ela, é sorteio. */
+  prioridade?: number;
 }
 
 export interface SorteioResultado {
@@ -81,7 +84,8 @@ function escolherParticipantes(jogadores: JogadorSorteio[], vagas: string[]): Jo
   if (jogadores.length <= vagas.length) return jogadores;
 
   const vagasDeGoleiro = vagas.filter((v) => v === 'GOL').length;
-  const embaralhados = embaralhar(jogadores);
+  // Embaralha antes de ordenar: quem empata na prioridade é sorteado (o sort é estável).
+  const embaralhados = embaralhar(jogadores).sort((a, b) => (b.prioridade ?? 0) - (a.prioridade ?? 0));
   const goleiros = embaralhados.filter((j) => j.position === 'GOL').slice(0, vagasDeGoleiro);
   const resto = embaralhados.filter((j) => !goleiros.includes(j));
   return [...goleiros, ...resto.slice(0, vagas.length - goleiros.length)];

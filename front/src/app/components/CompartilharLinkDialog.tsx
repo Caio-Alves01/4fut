@@ -81,12 +81,39 @@ export function CompartilharLinkDialog({ open, onOpenChange, endpoint, tipo, tit
     }
   }
 
+  // O navigator.clipboard só existe em página segura (HTTPS ou localhost). Acessando o site
+  // por http://IP ele não existe, então caímos no jeito antigo: selecionar o campo do link
+  // e usar o comando "copiar" do navegador. O campo fica dentro do diálogo, então o foco funciona.
   async function copiar() {
-    try {
-      await navigator.clipboard.writeText(link);
+    if (window.isSecureContext && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(link);
+        setErro(null);
+        setCopiado(true);
+        return;
+      } catch {
+        // tenta o jeito antigo abaixo
+      }
+    }
+
+    const campo = document.getElementById(`link-${tipo}`) as HTMLInputElement | null;
+    let ok = false;
+    if (campo) {
+      campo.focus();
+      campo.select();
+      campo.setSelectionRange(0, campo.value.length); // iPhone precisa disso
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+    }
+
+    if (ok) {
+      setErro(null);
       setCopiado(true);
-    } catch {
-      setErro('Não foi possível copiar automaticamente. Selecione o link e copie manualmente.');
+    } else {
+      setErro('Não foi possível copiar automaticamente. O link já está selecionado: use Ctrl+C (ou segure e toque em Copiar no celular).');
     }
   }
 

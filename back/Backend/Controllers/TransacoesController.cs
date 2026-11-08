@@ -25,7 +25,7 @@ namespace Backend.Controllers
         private async Task<Pelada?> BuscarPeladaDoUsuario(int peladaId)
         {
             var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var pelada = await _db.Peladas.FindAsync(peladaId);
+            var pelada = await _db.Peladas.SingleOrDefaultAsync(pel => pel.Id == peladaId);
 
             if (pelada is null || pelada.OwnerUserId != userId)
                 return null;

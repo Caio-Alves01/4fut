@@ -218,8 +218,11 @@ namespace Backend.Services
             }
 
             var nomes = jogadores.ToDictionary(j => j.Id, j => j.Name);
+            // Cobranças de partida excluída (exclusão lógica) ficam no banco, mas não são mais cobradas.
+            // _db.Partidas já vem sem as excluídas (filtro global do AppDbContext).
             var cobrancas = await _db.Cobrancas
-                .Where(c => c.PeladaId == pelada.Id && c.PagoEm == null)
+                .Where(c => c.PeladaId == pelada.Id && c.PagoEm == null
+                    && (c.PartidaId == null || _db.Partidas.Any(p => p.Id == c.PartidaId)))
                 .ToListAsync();
 
             foreach (var cobranca in cobrancas)
