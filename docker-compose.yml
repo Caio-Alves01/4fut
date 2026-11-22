@@ -39,8 +39,25 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    # Sem porta exposta: quem recebe as visitas é o Caddy, que repassa para cá.
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      - web
     ports:
       - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?Defina DOMAIN no .env, por exemplo americanados.com}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificados HTTPS (não apague)
+      - caddy_config:/config
 
 volumes:
   db_data:
+  caddy_data:
+  caddy_config:

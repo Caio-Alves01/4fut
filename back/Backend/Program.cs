@@ -93,7 +93,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Atrás do Nginx (container "web"), o IP real do usuário chega no cabeçalho X-Forwarded-For.
+// Atrás do Caddy e do Nginx (containers "caddy" e "web"), o IP real do usuário chega no cabeçalho X-Forwarded-For.
 // Sem isso, o rate limit veria todo mundo com o IP do Nginx e bloquearia todos juntos.
 // Pode confiar em qualquer proxy porque a API não fica exposta para fora da rede do Docker.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>

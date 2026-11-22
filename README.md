@@ -90,15 +90,20 @@ Autores: Caio Almeida Alves e Samuel Francis da Rocha Alves.
 
    Na primeira vez demora alguns minutos (baixa as imagens e compila front e back). A API cria as tabelas do banco sozinha ao iniciar.
 
-5. Acesse **http://localhost** (no servidor, `http://IP-DO-SERVIDOR`).
+5. Acesse **https://localhost** (no servidor, `https://SEU-DOMINIO`, por exemplo https://americanados.com).
+
+   Para rodar no próprio computador, use `DOMAIN=localhost` no `.env`. O Caddy cria um certificado local, e o navegador mostra um aviso de segurança na primeira vez: é só continuar.
 
 ### Containers
 
 | Serviço | O que é | Porta |
 | --- | --- | --- |
+| `caddy` | Recebe as visitas, cuida do HTTPS (certificado Let's Encrypt automático) e repassa para o `web` | **80 e 443** |
+| `web` | Nginx com o front compilado; repassa `/api` para a API | não exposta |
+| `api` | API ASP.NET Core | não exposta |
 | `db` | MySQL 8.4, dados no volume `db_data` | não exposta |
-| `api` | API ASP.NET Core | não exposta (só o `web` acessa) |
-| `web` | Nginx com o front compilado; repassa `/api` para a API | **80** |
+
+Quem acessa por `http://` ou pelo IP do servidor é redirecionado para `https://` no domínio, mantendo o caminho (links antigos continuam funcionando).
 
 ### Comandos úteis
 
@@ -188,6 +193,7 @@ Usadas pelo `docker-compose.yml` (arquivo `.env` na raiz). No desenvolvimento se
 
 | Variável | Obrigatória | Para que serve |
 | --- | --- | --- |
+| `DOMAIN` | Sim | Domínio do site, sem `http://` (ex.: `americanados.com`; para testar no computador, `localhost`). O DNS precisa apontar para o servidor |
 | `DB_PASSWORD` | Sim | Senha do usuário `fut4` do MySQL |
 | `DB_ROOT_PASSWORD` | Sim | Senha do root do MySQL |
 | `JWT_KEY` | Sim | Chave que assina os tokens de login (mínimo 32 caracteres) |
@@ -203,6 +209,12 @@ Depois de alterar o `.env`, aplique com `docker compose up -d`.
 ## Publicar e atualizar no servidor (VPS)
 
 ### Primeira vez
+
+Antes de subir:
+
+- O domínio precisa apontar para o IP do servidor (registro **A** no DNS). Confira com `ping americanados.com`.
+- As portas **80** e **443** precisam estar liberadas. Se o servidor usa o firewall `ufw`: `sudo ufw allow 80,443/tcp && sudo ufw allow 443/udp`.
+
 
 ```bash
 git clone https://github.com/Caio-Alves01/4fut.git ~/apps/4fut
@@ -255,7 +267,8 @@ docker compose exec db sh -c 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" fut4' >
 
 | Sintoma | Causa provável e solução |
 | --- | --- |
-| Porta 80 já em uso ao subir o Docker | Outro programa (IIS, Apache, Skype) usa a porta. Pare o programa ou troque `"80:80"` por `"8080:80"` no `docker-compose.yml` e acesse `http://localhost:8080` |
+| Porta 80 ou 443 já em uso ao subir o Docker | Outro programa (IIS, Apache, outro Nginx) usa a porta. Pare esse programa e rode `docker compose up -d` de novo |
+| HTTPS não funciona no servidor | Veja `docker compose logs caddy`. Normalmente o DNS ainda não aponta para o servidor ou as portas 80/443 estão bloqueadas. O Caddy tenta de novo sozinho; depois de corrigir, rode `docker compose restart caddy` |
 | API reinicia sem parar (`docker compose ps`) | Veja `docker compose logs api`. Geralmente falta uma variável obrigatória no `.env` (por exemplo `CPF_HASH_KEY`) ou o banco ainda não terminou de subir |
 | Front em dev mostra erro de conexão | A API não está rodando ou o `front/.env` aponta para outra porta. Confira `VITE_BACKEND_URL` |
 | Navegador avisa de certificado em `https://localhost:7156` | Rode `dotnet dev-certs https --trust` uma vez |

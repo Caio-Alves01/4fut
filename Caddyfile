@@ -1,0 +1,20 @@
+# Caddy fica na frente de tudo: recebe as portas 80 e 443, obtém e renova sozinho o
+# certificado HTTPS (Let's Encrypt) e repassa para o Nginx do container "web".
+# O domínio vem da variável DOMAIN do .env.
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
+
+# Quem acessar pelo IP do servidor (ex.: links antigos compartilhados como
+# http://169.58.200.147/...) é redirecionado para o domínio, mantendo o caminho.
+http:// {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+# Para aceitar também www.americanados.com, crie no DNS um registro para "www"
+# apontando para o mesmo IP e descomente o bloco abaixo:
+# www.{$DOMAIN} {
+# 	redir https://{$DOMAIN}{uri} permanent
+# }
